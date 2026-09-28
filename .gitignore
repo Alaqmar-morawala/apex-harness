@@ -1,0 +1,26 @@
+# ── Whitelist pattern: ignore everything, then allow only the Apex Harness files ──
+
+# Ignore everything by default
+*
+
+# Allow repo metadata
+!.gitignore
+!README.md
+
+# Allow the Apex Harness tool itself
+!apex
+!apex_harness.py
+
+# Allow project documentation
+!APEX_HARNESS.md
+!APEX_HARNESS_HANDOFF.md
+!API.md
+
+# ── Never track under any circumstance (explicit, even if whitelist changes) ──
+cookies.json
+cookies_*.json
+cookies_*.json.bak
+*.log
+__pycache__/
+node_modules/
+.env
