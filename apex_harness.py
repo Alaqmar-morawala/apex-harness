@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.8.1"
+VERSION = "1.9.0"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -73,6 +73,7 @@ MAX_OUTPUT_CHARS = 12_000
 READ_WINDOW = 250
 CONTEXT_BUDGET = 22_000
 HISTORY_FILE = Path.home() / ".apex" / "history"
+SESSION_FILE = Path.home() / ".apex" / "session.json"
 UNDO_STACK_LIMIT = 50
 SUBAGENT_MAX_STEPS = 12
 MAX_RENDER_CHARS = 20_000
@@ -551,6 +552,60 @@ class GensparkClient:
         self.project_id = None
         self.last_index = -1
         self.project_owner = None
+
+    def reload_pool(self):
+        """Re-scan cookie files without dropping the conversation thread.
+        If the thread's owning account is still in the pool, ownership is
+        reattached; otherwise the next task will fail over to a fresh thread
+        (the engine re-sends full context automatically)."""
+        was_owner = self.project_owner.name if self.project_owner else None
+        self.pool = AccountPool()
+        self._load_pool(self.cookie_spec)
+        self.project_owner = None
+        if was_owner:
+            for a in self.pool.accounts:
+                if a.name == was_owner:
+                    self.project_owner = a
+                    break
+        return was_owner
+
+    def save_thread_state(self) -> Optional[Dict[str, Any]]:
+        """Persist the thread handle so a restart can /resume it. The thread
+        lives server-side; only the handle (project_id/last_index/owner) is
+        client-side state."""
+        state = {
+            "project_id": self.project_id,
+            "last_index": self.last_index,
+            "owner": self.project_owner.name if self.project_owner else None,
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        try:
+            SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+            SESSION_FILE.write_text(json.dumps(state, indent=2))
+        except OSError:
+            pass
+        return state
+
+    def load_thread_state(self) -> Optional[Dict[str, Any]]:
+        try:
+            return json.loads(SESSION_FILE.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def resume_thread(self) -> Tuple[bool, str]:
+        state = self.load_thread_state()
+        if not state or not state.get("project_id"):
+            return False, "no saved session found"
+        owner_name = state.get("owner")
+        owner = next((a for a in self.pool.accounts if a.name == owner_name), None)
+        if owner is None:
+            return False, (f"the thread's account ({owner_name}) is not in the current pool — "
+                           "make sure its cookie file is present")
+        self.project_id = state["project_id"]
+        self.last_index = int(state.get("last_index", -1))
+        self.project_owner = owner
+        when = state.get("saved_at", "?")
+        return True, f"thread {str(state['project_id'])[:8]}… reattached (owner {owner.name}, saved {when})"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1787,6 +1842,11 @@ class AgentEngine:
             self._stop = True
             print(C.s("\n  [task interrupted — session preserved]", C.YELLOW))
             return ""
+        finally:
+            # persist the thread handle after every task so a process restart
+            # can reattach via /resume instead of losing the session
+            if self.client.project_id:
+                self.client.save_thread_state()
 
     def _run_loop(self, user_input: str) -> str:
         self._stop = False
@@ -2286,6 +2346,8 @@ class ApexCLI:
   {C.CYAN}/model [name]{C.RESET}     View or switch model
   {C.CYAN}/search [on|off]{C.RESET}  Toggle web search
   {C.CYAN}/accounts{C.RESET}         Account pool health
+  {C.CYAN}/reload{C.RESET}            Re-scan cookie files (pick up new accounts)
+  {C.CYAN}/resume{C.RESET}            Reattach the last saved thread after a restart
   {C.CYAN}/undo{C.RESET}             Undo last file change
   {C.CYAN}/reset{C.RESET}            Clear conversation
   {C.CYAN}/clear{C.RESET}            Clear screen
@@ -2384,9 +2446,26 @@ class ApexCLI:
                 print(f"    {dot}  {h['tag']}  req={h['requests']} ok={h['successes']} 429={h['rate_limits']}")
             print()
 
+        elif cmd == "/reload":
+            was = self.client.reload_pool()
+            n = len(self.client.pool.accounts)
+            extra = f" — thread owner '{was}' reattached" if was and self.client.project_owner else ""
+            if was and not self.client.project_owner:
+                extra = f" — NOTE: thread owner '{was}' is gone; next task starts a fresh thread"
+            print(C.s(f"  Pool reloaded: {n} account(s){extra}", C.GREEN))
+
+        elif cmd == "/resume":
+            ok, msg = self.client.resume_thread()
+            if ok:
+                print(C.s(f"  Session resumed: {msg}", C.GREEN))
+                print(C.s("  Your next task continues in the existing thread.", C.CYAN))
+            else:
+                print(C.s(f"  Cannot resume: {msg}", C.RED))
+
         elif cmd == "/reset":
             self.ctx.clear()
             self.client.reset_thread()
+            self.client.save_thread_state()
             print(C.s("  Reset.", C.GREEN))
 
         elif cmd == "/clear":
