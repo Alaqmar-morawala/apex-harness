@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 DEFAULT_MODEL = "opus-5.5"
 MAX_STEPS_DEFAULT = 30

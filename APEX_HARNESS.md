@@ -126,7 +126,7 @@ Skills are reusable instruction packs the model loads on demand (progressive dis
   ---
   Instructions for the agent...
   ```
-- **Bundled packs**: `git-workflow`, `debugging`, `code-review`, `security-recon` (authorized testing only), `python-testing`, `writing-docs`.
+- **Bundled packs** (internet-adapted, attributed): `test-driven-development` (Iron Law: no production code without a failing test first), `systematic-debugging` (4-phase root-cause process), `verification-before-completion` (evidence-before-claims gate function), `writing-plans` (verifiable numbered steps), `brainstorming` (design-before-code for ambiguous/large work), `git-workflow`, `code-review`, `python-testing`, `security-recon` (authorized testing only), `writing-docs`. Adapted from [obra/superpowers](https://github.com/obra/superpowers) (MIT) and tailored to Apex's tool contract (paged reads, one tool per step, write_file contract).
 
 ## 6. Model Catalog
 

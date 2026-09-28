@@ -237,6 +237,15 @@ An independent QA subagent ran an 11-scenario live-API acceptance suite (`/tmp/a
 4. **Bundled packs** (in `skills/`, git-whitelisted): `git-workflow`, `debugging`, `code-review`, `security-recon` (scope-gate first, authorized testing only), `python-testing`, `writing-docs`.
 5. **Parsing safety** — skill bodies frequently contain tool examples; they are returned as tool results / prompt text (never re-parsed), and any fenced examples the model echoes back are handled by the existing code-fence masking.
 
+## 4.4 Internet-Sourced Skill Library (v1.5.0)
+
+The bundled packs were upgraded from hand-rolled to **adaptations of the most-recommended open agent skills**, researched from the 2026 ecosystem (consensus sources: [obra/superpowers](https://github.com/obra/superpowers) — MIT, the most-praised methodology collection; [VoltAgent/awesome-agent-skills](https://github.com/VoltAgent/awesome-agent-skills) aggregate; Anthropic's official skills).
+
+- **Adapted from superpowers (MIT, attributed in each pack)**: `test-driven-development` (Iron Law + mandatory RED/GREEN verification + rationalization table), `systematic-debugging` (4 phases, "no fixes without root cause", red-flag list — replaces the earlier hand-rolled `debugging.md`), `verification-before-completion` (evidence-before-claims gate + claim→evidence table), plus `writing-plans` and `brainstorming` adapted to Apex's auto-execute mode (plans/designs live in chat, not disk).
+- **Apex-specific tailoring in every pack**: verification via fresh `bash` runs with quoted output, surgical `read_file` paging while tracing code, `grep` for finding working reference code, the write_file contract, and the no-unsolicited-files rule.
+- **Upgraded in place**: `git-workflow` (branch finishing hygiene), `python-testing` (red-green regression rule, cross-linked to TDD). **Unchanged**: `code-review`, `security-recon`, `writing-docs` (already aligned with the canon's severity-based review format).
+- Skill set is now 10 packs; `SkillStore` needed no code changes (pure content update).
+
 ---
 
 ## 5. Model Catalog Reference
