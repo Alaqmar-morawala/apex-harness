@@ -149,7 +149,25 @@ Pick native Windows (§3, cmd.exe backend) for simplicity, or WSL when you need 
 
 ---
 
-## 7. Updating
+## 7. Skills
+
+Skills are markdown instruction packs the agent loads on demand. Bundled packs live in `skills/` (git-workflow, debugging, code-review, security-recon, python-testing, writing-docs).
+
+**Add your own** — drop a `.md` file into `~/.apex/skills/` (all projects) or `<project>/.apex/skills/` (this project only):
+
+```markdown
+---
+name: my-skill
+description: One line the model sees when deciding whether to load it
+---
+Instructions for the agent...
+```
+
+Manage in the REPL: `/skills` lists what's installed; `/skill my-skill` forces it onto the next task. The model also self-loads matching skills via the `skill` tool.
+
+---
+
+## 8. Updating
 
 ```bash
 git pull

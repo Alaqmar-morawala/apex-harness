@@ -8,6 +8,7 @@ A native, single-file autonomous coding agent built for **Genspark models**. Ape
 
 ## Features
 
+- **Agentic skill system** — bundled markdown skill packs (`skills/`: git-workflow, debugging, code-review, security-recon, python-testing, writing-docs) loaded by the model on demand via a `skill` tool, with progressive disclosure. Add your own in `~/.apex/skills/` or `.apex/skills/` — no code changes needed
 - **Direct SSE streaming** to Genspark's `ask_proxy` endpoint with live token counter and single-pass compiled Markdown output
 - **Multi-account pool** — auto-discovers `cookies*.json`, round-robin rotation, 429 cooldown with automatic failover, 401/403 account disablement, network-error failover
 - **Persistent PTY shell** — `cd`, exports, and virtualenvs survive across tool calls; auto-restarts if the shell dies
@@ -32,7 +33,7 @@ python apex_harness.py      # works everywhere
 
 ## REPL commands
 
-`/model` · `/search` · `/accounts` · `/undo` · `/reset` · `/steps` · `/history` · `/clear` · `/help` · `/exit`
+`/model` · `/search` · `/accounts` · `/undo` · `/skills` · `/skill <name>` · `/reset` · `/steps` · `/history` · `/clear` · `/help` · `/exit`
 
 ## Architecture
 

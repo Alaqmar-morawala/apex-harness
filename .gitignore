@@ -12,6 +12,10 @@
 !apex.cmd
 !apex_harness.py
 
+# Allow bundled skill packs
+!skills/
+!skills/**
+
 # Allow project documentation
 !APEX_HARNESS.md
 !APEX_HARNESS_HANDOFF.md

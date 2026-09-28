@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 DEFAULT_MODEL = "opus-5.5"
 MAX_STEPS_DEFAULT = 30
@@ -781,12 +781,83 @@ class FileSnapshot:
         return bool(self._stack)
 
 
+class SkillStore:
+    """Discovers and loads skill packs: markdown files with `name`/`description`
+    frontmatter. Sources (later overrides earlier): bundled repo `skills/`,
+    user-global `~/.apex/skills/`, project-local `<cwd>/.apex/skills/`, plus any
+    extra_dirs (highest priority)."""
+
+    def __init__(self, extra_dirs: Optional[List[Path]] = None):
+        base = Path(__file__).resolve().parent
+        self.dirs: List[Tuple[str, Path]] = [
+            ("bundled", base / "skills"),
+            ("user", Path.home() / ".apex" / "skills"),
+            ("project", Path.cwd() / ".apex" / "skills"),
+        ]
+        for d in (extra_dirs or []):
+            self.dirs.append(("extra", Path(d)))
+        self._cache: Optional[Dict[str, Dict[str, str]]] = None
+
+    def list(self) -> List[Dict[str, str]]:
+        if self._cache is None:
+            by_name: Dict[str, Dict[str, str]] = {}
+            for source, d in self.dirs:
+                if not d.is_dir():
+                    continue
+                for f in sorted(d.glob("*.md")):
+                    parsed = self._parse(f)
+                    if parsed:
+                        parsed["source"] = source
+                        by_name[parsed["name"].lower()] = parsed
+            self._cache = by_name
+        return sorted(self._cache.values(), key=lambda s: s["name"])
+
+    def load(self, name: str) -> Optional[str]:
+        self.list()
+        entry = self._cache.get((name or "").strip().lower())
+        return entry["body"] if entry else None
+
+    @staticmethod
+    def _parse(path: Path) -> Optional[Dict[str, str]]:
+        try:
+            text = path.read_text()
+        except OSError:
+            return None
+        m = re.match(r"\s*---\s*\n(.*?)\n---\s*\n?(.*)$", text, re.DOTALL)
+        if m:
+            fm, body = m.group(1), m.group(2).strip()
+            nm = re.search(r"^name:\s*(.+)$", fm, re.MULTILINE)
+            dm = re.search(r"^description:\s*(.+)$", fm, re.MULTILINE)
+            name = nm.group(1).strip() if nm else path.stem
+            desc = dm.group(1).strip() if dm else ""
+        else:
+            body, name, desc = text.strip(), path.stem, ""
+        if not desc:
+            first = next((ln.strip() for ln in body.splitlines()
+                          if ln.strip() and not ln.strip().startswith("#")), "")
+            desc = first.lstrip("# ").strip()
+        if not body:
+            return None
+        return {"name": name, "description": desc, "body": body, "path": str(path)}
+
+
 class ToolRegistry:
     """Local tool implementations."""
 
-    def __init__(self, shell: PersistentShell, snaps: FileSnapshot):
+    def __init__(self, shell: PersistentShell, snaps: FileSnapshot,
+                 skills: Optional[SkillStore] = None):
         self.shell = shell
         self.snaps = snaps
+        self.skills = skills
+
+    def skill(self, name: str) -> str:
+        if not (name or "").strip():
+            return "[error] skill name required (e.g. <tool name=\"skill\" name=\"git-workflow\">)"
+        body = self.skills.load(name) if self.skills else None
+        if body is None:
+            avail = ", ".join(s["name"] for s in self.skills.list()) if self.skills else "none installed"
+            return f"[error] skill not found: {name}. Available: {avail}"
+        return f"[skill loaded: {name} — apply these instructions for the rest of the task]\n\n{body}"
 
     def bash(self, command: str, timeout: int = SHELL_TIMEOUT) -> str:
         output, code = self.shell.run(command, timeout=timeout)
@@ -973,7 +1044,7 @@ class ToolCall:
 
 
 class ToolParser:
-    NAMES = {"bash", "read_file", "write_file", "edit_file", "list_dir", "grep"}
+    NAMES = {"bash", "read_file", "write_file", "edit_file", "list_dir", "grep", "skill"}
 
     MD_BASH_RE = re.compile(r'```(?:bash|sh|shell)\s*\n(.*?)\n\s*```', re.DOTALL)
 
@@ -1191,6 +1262,8 @@ class ToolParser:
                 "path": attrs.get("path", "."),
                 "include": attrs.get("include", ""),
             }
+        elif name == "skill":
+            return {"name": attrs.get("name") or attrs.get("skill") or body}
         return {}
 
 
@@ -1266,7 +1339,7 @@ class ContextManager:
 # § 6. AGENT ENGINE — ReAct Loop + System Prompt
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _system_prompt() -> str:
+def _system_prompt(skills: Optional[SkillStore] = None) -> str:
     cwd = os.getcwd()
     if _POSIX:
         plat = f"{platform.system()} {platform.machine()}"
@@ -1278,6 +1351,24 @@ def _system_prompt() -> str:
             "Use Windows command syntax: dir, type, del, copy, where, python. "
             "bash syntax (ls, cat, rm, grep) does NOT work — use the dedicated tools instead."
         )
+
+    skills_section = ""
+    available = skills.list() if skills else []
+    if available:
+        lines = "\n".join(f"- {s['name']}: {s['description']}" for s in available)
+        skills_section = textwrap.dedent(f"""\
+
+        ## Skills
+
+        Reusable instruction packs are available through the `skill` tool.
+        If the task matches one, load it BEFORE doing the related work:
+        <tool name="skill" name="skill-name">
+        </tool>
+
+        Available skills:
+        {lines}
+        """)
+
     return textwrap.dedent(f"""\
     You are Apex, an autonomous coding agent executing directly on the user's workstation.
     You have active local tool integration: bash, read_file, write_file, edit_file, list_dir, grep.
@@ -1290,7 +1381,7 @@ def _system_prompt() -> str:
     - Platform: {plat}
     - {shell_line}
     - Date: {time.strftime('%Y-%m-%d')}
-
+    {skills_section}
     ## Tool Calling
 
     To use a tool, output an XML tag. You may include brief thinking before the tag.
@@ -1358,6 +1449,7 @@ class AgentEngine:
         model: str = DEFAULT_MODEL,
         max_steps: int = MAX_STEPS_DEFAULT,
         search: bool = False,
+        skills: Optional[SkillStore] = None,
     ):
         self.client = client
         self.tools = tools
@@ -1366,6 +1458,8 @@ class AgentEngine:
         self.max_steps = max_steps
         self.search = search
         self.moa: Optional[List[str]] = None
+        self.skills = skills
+        self.pending_skills: List[Tuple[str, str]] = []
         self._stop = False
 
     def run(self, user_input: str) -> str:
@@ -1381,7 +1475,7 @@ class AgentEngine:
     def _run_loop(self, user_input: str) -> str:
         self._stop = False
         self.ctx.add("user", user_input)
-        system = _system_prompt()
+        system = _system_prompt(self.skills)
 
         step = 0
         final = ""
@@ -1391,10 +1485,16 @@ class AgentEngine:
         while step < self.max_steps and not self._stop:
             step += 1
             if step == 1:
+                queued = ""
+                if self.pending_skills:
+                    queued = "\n\n" + "\n\n".join(
+                        f"[Skill active: {n}]\n{b}" for n, b in self.pending_skills
+                    )
+                    self.pending_skills = []
                 if self.client.project_id is None:
-                    prompt = f"{system}\n\nUser: {user_input}"
+                    prompt = f"{system}\n\nUser: {user_input}{queued}"
                 else:
-                    prompt = f"User: {user_input}"
+                    prompt = f"User: {user_input}{queued}"
             else:
                 tc_name = last_tc.name if last_tc else "tool"
                 prompt = f"Tool Result [{tc_name}]:\n{last_out}"
@@ -1515,6 +1615,8 @@ class AgentEngine:
                     path=a.get("path", "."),
                     include=a.get("include", ""),
                 )
+            elif tc.name == "skill":
+                return self.tools.skill(name=a.get("name", ""))
             else:
                 return f"[error] Unknown tool: {tc.name}"
         except Exception as e:
@@ -1604,7 +1706,7 @@ def _ui_newline():
 def _ui_tool_start(tc: ToolCall):
     icons = {
         "bash": "⌘", "read_file": "📄", "write_file": "✏️",
-        "edit_file": "🔧", "list_dir": "📂", "grep": "🔍",
+        "edit_file": "🔧", "list_dir": "📂", "grep": "🔍", "skill": "🧠",
     }
     icon = icons.get(tc.name, "🔨")
     detail = ""
@@ -1675,7 +1777,8 @@ class ApexCLI:
         self.client = GensparkClient(args.cookies)
         self.shell = PersistentShell()
         self.snaps = FileSnapshot()
-        self.tools = ToolRegistry(self.shell, self.snaps)
+        self.skills = SkillStore()
+        self.tools = ToolRegistry(self.shell, self.snaps, skills=self.skills)
         self.ctx = ContextManager()
         self.engine = AgentEngine(
             client=self.client,
@@ -1684,6 +1787,7 @@ class ApexCLI:
             model=args.model,
             max_steps=args.max_steps,
             search=args.search,
+            skills=self.skills,
         )
         self.query = args.query
 
@@ -1744,6 +1848,8 @@ class ApexCLI:
   {C.CYAN}/reset{C.RESET}            Clear conversation
   {C.CYAN}/clear{C.RESET}            Clear screen
   {C.CYAN}/steps [n]{C.RESET}        View/set max steps
+  {C.CYAN}/skills{C.RESET}            List installed skill packs
+  {C.CYAN}/skill <name>{C.RESET}      Queue a skill for the next task
   {C.CYAN}/history{C.RESET}          Context usage stats
   {C.CYAN}/help{C.RESET}             This help
   {C.CYAN}/exit{C.RESET}             Quit
@@ -1820,6 +1926,29 @@ class ApexCLI:
             n, sz = self.ctx.stats()
             pct = sz * 100 // self.ctx.budget if self.ctx.budget else 0
             print(f"  {n} turns, {sz} chars ({pct}% of budget)")
+
+        elif cmd == "/skills":
+            skills = self.skills.list()
+            if not skills:
+                print(C.s("  No skills installed. Add *.md files to ~/.apex/skills/ or .apex/skills/.", C.YELLOW))
+            else:
+                print(f"\n  {C.BOLD}Installed skills:{C.RESET}")
+                for s in skills:
+                    queued = "  [queued]" if any(n == s["name"] for n, _ in self.engine.pending_skills) else ""
+                    print(f"    {C.CYAN}{s['name']}{C.RESET}  {C.DIM}({s['source']}){C.RESET}  {s['description']}{queued}")
+                print()
+
+        elif cmd == "/skill":
+            if not arg:
+                print(C.s("  Usage: /skill <name>   (/skills to list)", C.RED))
+            else:
+                body = self.skills.load(arg)
+                if body is None:
+                    avail = ", ".join(s["name"] for s in self.skills.list()) or "none"
+                    print(C.s(f"  Skill not found: {arg}. Available: {avail}", C.RED))
+                else:
+                    self.engine.pending_skills.append((arg, body))
+                    print(C.s(f"  [skill queued: {arg} — activates at the start of your next task]", C.GREEN))
 
         else:
             print(C.s(f"  Unknown: {cmd}. /help", C.RED))

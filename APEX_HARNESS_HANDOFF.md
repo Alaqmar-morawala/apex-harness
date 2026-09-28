@@ -229,6 +229,16 @@ An independent QA subagent ran an 11-scenario live-API acceptance suite (`/tmp/a
 
 ---
 
+## 4.3 Skill System (v1.4.0)
+
+1. **SkillStore** — discovers markdown skill packs with `name`/`description` frontmatter from (in override order) bundled repo `skills/` → `~/.apex/skills/` → `<cwd>/.apex/skills/` → extra dirs. Name lookup is case-insensitive; missing frontmatter falls back to filename stem + first content line.
+2. **`skill` tool** — `<tool name="skill" name="X">` returns the body prefixed with `[skill loaded: X — apply these instructions...]`. Unknown names error with the available list. Progressive disclosure: the system prompt carries only the name/description list; bodies enter context on load.
+3. **REPL** — `/skills` lists packs with source dir and queued state; `/skill <name>` queues a pack which is injected into the step-1 prompt of the next task (`engine.pending_skills`).
+4. **Bundled packs** (in `skills/`, git-whitelisted): `git-workflow`, `debugging`, `code-review`, `security-recon` (scope-gate first, authorized testing only), `python-testing`, `writing-docs`.
+5. **Parsing safety** — skill bodies frequently contain tool examples; they are returned as tool results / prompt text (never re-parsed), and any fenced examples the model echoes back are handled by the existing code-fence masking.
+
+---
+
 ## 5. Model Catalog Reference
 
 The default model is configured as **`opus-5.5`** in `apex_harness.py`:

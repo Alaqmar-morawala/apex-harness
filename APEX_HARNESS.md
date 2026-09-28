@@ -112,7 +112,23 @@ Supports multiple syntax formats emitted by different LLMs:
 
 ---
 
-## 5. Model Catalog
+### § 5. Skill System
+Skills are reusable instruction packs the model loads on demand (progressive disclosure — only the name/description list lives in the system prompt; full instructions enter context only when used).
+
+- **Loading by the model**: `<tool name="skill" name="git-workflow">` returns the skill body prefixed with an activation header.
+- **Loading by you**: `/skill <name>` queues a skill; it activates at the start of your next task. `/skills` lists everything installed.
+- **Locations** (later overrides earlier on name clashes): bundled repo `skills/` → user-global `~/.apex/skills/` → project-local `<cwd>/.apex/skills/`.
+- **Format**: markdown with optional frontmatter:
+  ```markdown
+  ---
+  name: my-skill
+  description: One line — shown to the model in the skills list
+  ---
+  Instructions for the agent...
+  ```
+- **Bundled packs**: `git-workflow`, `debugging`, `code-review`, `security-recon` (authorized testing only), `python-testing`, `writing-docs`.
+
+## 6. Model Catalog
 
 Apex provides access to the complete Genspark model fleet, including:
 
