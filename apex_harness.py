@@ -58,14 +58,15 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 DEFAULT_MODEL = "opus-5.5"
 MAX_STEPS_DEFAULT = 30
 SHELL_TIMEOUT = 120
-OUTPUT_HEAD = 80
-OUTPUT_TAIL = 120
-MAX_OUTPUT_CHARS = 30_000
+OUTPUT_HEAD = 60
+OUTPUT_TAIL = 100
+MAX_OUTPUT_CHARS = 12_000
+READ_WINDOW = 250
 CONTEXT_BUDGET = 22_000
 HISTORY_FILE = Path.home() / ".apex" / "history"
 UNDO_STACK_LIMIT = 50
@@ -803,11 +804,22 @@ class ToolRegistry:
             lines = p.read_text().splitlines()
             total = len(lines)
             start = max(0, offset - 1)
-            end = start + limit if limit > 0 else total
+            # Default window: READ_WINDOW lines. Whole-file reads blow up the
+            # upstream thread context — the model should page with offset/limit.
+            if limit <= 0:
+                limit = min(READ_WINDOW, max(total - start, 1))
+            end = start + limit
             selected = lines[start:end]
             numbered = [f"{i+start+1:5d} | {l}" for i, l in enumerate(selected)]
             header = f"[{path}] {total} lines, showing {start+1}–{min(end, total)}"
-            return self._truncate(f"{header}\n" + "\n".join(numbered))
+            body = f"{header}\n" + "\n".join(numbered)
+            if end < total:
+                body += (
+                    f"\n[... file continues — {total - end} more lines. "
+                    f"Use offset={min(end + 1, total)} limit={READ_WINDOW} to page, "
+                    f"or grep to locate specific content.]"
+                )
+            return body
         except Exception as e:
             return f"[error] {path}: {e}"
 
@@ -1289,10 +1301,10 @@ def _system_prompt() -> str:
     ls -la
     </tool>
 
-    ### read_file — Read a file with line numbers
+    ### read_file — Read a file with line numbers (paged: returns up to ~250 lines)
     <tool name="read_file" path="/absolute/path/to/file">
     </tool>
-    With offset and limit:
+    With offset and limit for targeted reads (PREFERRED for large files):
     <tool name="read_file" path="/path/file" offset="50" limit="30">
     </tool>
 
@@ -1328,6 +1340,12 @@ def _system_prompt() -> str:
        To create or write a file, you MUST put the file content INSIDE the <tool name="write_file" path="...">content</tool> tag.
        NEVER output the file content as raw chat text or markdown blocks — the ONLY way files are created on disk is through the write_file tool.
     9. Complete file contents: Always provide the complete file content inside write_file.
+
+    ## Working style (agentic discipline)
+    - PLAN FIRST: for any multi-step task, your FIRST response is a short numbered plan (3-6 steps, one line each). Then execute it step by step. Never re-plan mid-task unless something failed.
+    - BE SURGICAL with reads: files larger than ~250 lines are paged — use offset/limit to read only what you need, and grep to locate content before reading. Do NOT read entire large files.
+    - CREATE ONLY WHAT WAS ASKED: never generate unsolicited summary, index, README, or "documentation about the work" files. The user reads your chat summary; extra files are noise.
+    - FINISH CLEAN: when the task's goal is met, stop. Your final message is a short result summary (what changed, where, how verified) — not a restatement of everything you did.
     """)
 
 
@@ -1451,7 +1469,7 @@ class AgentEngine:
                     f"were IGNORED ({ignored}). Make ONE tool call per response."
                 )
                 print(C.s(f"  [warn] model emitted {len(calls)} tool calls — executed only {tc.name}", C.YELLOW))
-            _ui_tool_output(output)
+            _ui_tool_output(output, tool=tc.name)
             self.ctx.add("tool_result", output, tool_name=tc.name, step=step)
             last_tc = tc
             last_out = output
@@ -1604,22 +1622,24 @@ def _ui_tool_start(tc: ToolCall):
     print(f"\n  {C.BOLD}{C.GREEN}┌─ {icon} {tc.name}{C.RESET}  {C.DIM}{detail}{C.RESET}")
 
 
-def _ui_tool_output(output: str):
+def _ui_tool_output(output: str, tool: str = ""):
+    # Reads/directory dumps are visual noise at full length — display a tighter window.
+    half = 15 if tool in ("read_file", "list_dir", "grep") else 30
     lines = output.splitlines()
-    limit = 60
+    limit = half * 2
     if len(lines) > limit:
-        shown = 60
+        shown = limit
         hidden = len(lines) - shown
-        for ln in lines[:30]:
+        for ln in lines[:half]:
             print(f"  {C.GREEN}│{C.RESET} {C.DIM}{ln}{C.RESET}")
         print(f"  {C.GREEN}│{C.RESET} {C.YELLOW}  … {hidden} display lines collapsed …{C.RESET}")
         # surface any truncation notes from the tool layer that would otherwise be hidden
         for i, ln in enumerate(lines):
             s = ln.strip()
-            if (s.startswith("[...") and ("omitted" in s or "truncated" in s)
-                    and 30 <= i < len(lines) - 30):
+            if (s.startswith("[...") and ("omitted" in s or "truncated" in s or "file continues" in s)
+                    and half <= i < len(lines) - half):
                 print(f"  {C.GREEN}│{C.RESET} {C.YELLOW}{s}{C.RESET}")
-        for ln in lines[-30:]:
+        for ln in lines[-half:]:
             print(f"  {C.GREEN}│{C.RESET} {C.DIM}{ln}{C.RESET}")
     else:
         for ln in lines:
