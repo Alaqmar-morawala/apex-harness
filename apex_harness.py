@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -488,6 +488,9 @@ class GensparkClient:
                 # that as a soft rate limit so the pool fails over instead of
                 # relaying the notice as if it were an answer.
                 if "5-hour limit" in text or "hour limit" in text.lower():
+                    # The window lasts up to 5 hours — a 60s cooldown would just
+                    # bounce requests off this account on every rotation
+                    acc.cooldown = 1800
                     acc.mark_429()
                     last_err = requests.HTTPError("account usage window exhausted", response=r)
                     print(C.s(
@@ -498,6 +501,7 @@ class GensparkClient:
                         continue
                     raise last_err
 
+                acc.cooldown = 60  # success resets any elevated cooldown
                 acc.mark_ok()
                 self.project_owner = acc
                 return {
