@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.7.4"
+VERSION = "1.7.5"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -108,6 +108,8 @@ MODEL_CATALOG: Dict[str, Dict[str, str]] = {
     "gpt-5.4-pro":                {"label": "GPT-5.4 Pro",             "tier": "30x",  "cls": "reasoning"},
     "gpt-5.2-pro":                {"label": "GPT-5.2 Pro",             "tier": "21x",  "cls": "reasoning"},
     "gpt-5.6-sol":                {"label": "GPT-5.6 Sol",             "tier": "4x",   "cls": "coding"},
+    "gpt-6-sol":                  {"label": "GPT-6 Sol",               "tier": "4x",   "cls": "coding"},
+    "gpt-6-luna":                 {"label": "GPT-6 Luna",              "tier": "0.2x", "cls": "fast"},
     "gpt-5.5":                    {"label": "GPT-5.5",                 "tier": "5x",   "cls": "coding"},
     "gpt-5.4":                    {"label": "GPT-5.4",                 "tier": "3x",   "cls": "coding"},
     "gpt-5.6-terra":              {"label": "GPT-5.6 Terra",           "tier": "2x",   "cls": "coding"},
@@ -131,10 +133,11 @@ MODEL_CATALOG: Dict[str, Dict[str, str]] = {
 }
 
 MOA_DEFAULT = ["gpt-5.1-low", "claude-sonnet-4-6", "gemini-3.1-pro-preview"]
-# All-best-GPT ensemble — every id server-verified 2026-09-29 (gpt-5.5-pro and
-# gpt-5.5 serve as dated variants; prefix match counts as honored). Two 30x-tier
-# members: expect ~4x credit burn per step.
-MOA_GPT = ["gpt-5.5-pro", "gpt-5.4-pro", "gpt-5.6-sol", "gpt-5.5"]
+# All-best-GPT ensemble — every id server-verified (gpt-5.5-pro serves as a
+# dated variant; prefix match counts as honored). gpt-6-sol added 2026-09-29
+# per user request (replaces gpt-5.5). Two 30x-tier members: expect ~4x burn.
+# NOTE: gpt-6-sol tier "4x" mirrors the 5.6-sol line — multiplier unverified.
+MOA_GPT = ["gpt-5.5-pro", "gpt-5.4-pro", "gpt-5.6-sol", "gpt-6-sol"]
 MOA_PRESETS = {
     "genspark-moa": MOA_DEFAULT,
     "gpt-moa": MOA_GPT,
