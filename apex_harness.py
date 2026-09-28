@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.7.5"
+VERSION = "1.7.6"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -398,6 +398,14 @@ class GensparkClient:
                 "last_seen_event_index": self.last_index,
                 "chat_session_id": None,
             }
+
+            if moa_models:
+                # Match the web UI's MoA payload exactly: the ENSEMBLE also goes
+                # in "models", and ai_chat_model is the ensemble's lead model.
+                # Without this, the request bills/runs as a plain ai_chat_model
+                # (default Opus) call — the ensemble never engages.
+                payload["ai_chat_model"] = moa_models[0]
+                payload["models"] = moa_models
 
             try:
                 r = acc.session.post(
@@ -2126,7 +2134,7 @@ class ApexCLI:
         _moa_key = MOA_ALIASES.get(args.model, args.model)
         if _moa_key in MOA_PRESETS:
             self.engine.moa = list(MOA_PRESETS[_moa_key])
-            self.engine.model = DEFAULT_MODEL
+            self.engine.model = MOA_PRESETS[_moa_key][0]
         self.query = args.query
 
         # readline history (POSIX; Windows console host provides basic line editing)
@@ -2200,7 +2208,10 @@ class ApexCLI:
                 if key in MOA_PRESETS:
                     ensemble = MOA_PRESETS[key]
                     old = self.engine.model + (" + MoA" if self.engine.moa else "")
+                    if not self.engine.moa:
+                        self._moa_prev_model = self.engine.model
                     self.engine.moa = list(ensemble)
+                    self.engine.model = ensemble[0]  # primary = ensemble lead (this is what gets billed)
                     if key == "gpt-moa":
                         print(C.s(f"  {old} → GPT Mixture-of-Agents ({' + '.join(ensemble)})", C.GREEN))
                         print(C.s("  [two 30x-tier members — expect ~4x credit burn per step]", C.YELLOW))
@@ -2240,7 +2251,10 @@ class ApexCLI:
                     print(f"  Presets: /model genspark-moa · /model gpt-moa")
             elif arg.strip().lower() == "off":
                 self.engine.moa = None
-                print(C.s("  MoA disabled — single-model mode.", C.GREEN))
+                prev = getattr(self, "_moa_prev_model", None)
+                if prev and prev not in [m for m in self.engine.moa or []]:
+                    self.engine.model = prev
+                print(C.s(f"  MoA disabled — back to {self.engine.model}.", C.GREEN))
             else:
                 ids = arg.split()
                 unknown = [i for i in ids if i not in MODEL_CATALOG]
@@ -2249,7 +2263,10 @@ class ApexCLI:
                 elif len(ids) < 2:
                     print(C.s("  MoA needs at least 2 models.", C.RED))
                 else:
+                    if not self.engine.moa:
+                        self._moa_prev_model = self.engine.model
                     self.engine.moa = ids
+                    self.engine.model = ids[0]
                     print(C.s(f"  Custom MoA ensemble: {' + '.join(ids)}", C.GREEN))
                     print(C.s(f"  [~{len(ids)}x credit burn per step — every model runs on every step]", C.YELLOW))
 
