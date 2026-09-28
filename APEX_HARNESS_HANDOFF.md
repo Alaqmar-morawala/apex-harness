@@ -237,6 +237,20 @@ An independent QA subagent ran an 11-scenario live-API acceptance suite (`/tmp/a
 4. **Bundled packs** (in `skills/`, git-whitelisted): `git-workflow`, `debugging`, `code-review`, `security-recon` (scope-gate first, authorized testing only), `python-testing`, `writing-docs`.
 5. **Parsing safety** — skill bodies frequently contain tool examples; they are returned as tool results / prompt text (never re-parsed), and any fenced examples the model echoes back are handled by the existing code-fence masking.
 
+## 4.5 External-Review Fixes (v1.7.0 → v1.7.1)
+
+An independent code review found 7 defects; all were fixed and then re-verified by a hostile QA subagent (7/7 FIXED, 2 live E2E tasks PASS, and its 2 residual new-bugs also fixed):
+
+- **#3 Edits**: tool bodies are dedented (uniform tag-relative indentation no longer corrupts files); the `---` separator is recognized when indented; a MISSING separator now refuses the edit (`edit_error` routed through `_exec`) instead of deleting the matched code; empty `old_string` is refused (no fake success on empty files).
+- **#4 Timeout desync**: on timeout the harness sends Ctrl+C to the PTY and RE-SENDS the sentinel line — interruptible commands keep the shell's cwd/env state; only truly unkillable commands cost a shell restart. Either way the next command returns ITS OWN output.
+- **#5 Parser nesting**: only tags with a valid `<tool name="...">` header affect nesting (bare `<tool…` mentions are content); unclosed nested opens are resolved by minimal-combination backtracking (1 skip, then pairs, capped); a pathological tag that still can't resolve becomes a `parse_error` result instead of salvaging the message tail into a file.
+- **#6 grep de-shelled**: `grep` is pure Python on ALL platforms — patterns with quotes/apostrophes just work and crafted patterns (`'; touch x; '`) cannot execute commands.
+- **#7 Truncated streams**: `stream()` reports `finished` (True only on the FINISHED event); the engine detects open/close tag imbalance and retries the step instead of executing a half-written file; a second cut-off ends the task.
+- **#8 Exit codes/silent crashes**: `set +H` disables history expansion (`!` safe, truthful exit codes); non-numeric attributes are dropped via `_safe_int` (no task crash); unknown tool names become self-correcting error results listing available tools instead of ending the task; the parser itself is wrapped so it can never kill a task.
+- **#9 Correctness**: file-tool paths resolve against the SHELL's cwd (sentinel carries `$PWD`/`%CD%`; a `cd` in bash redirects relative writes); CRLF files stay CRLF through edits; writes go through temp-file + `os.replace` (atomic, no `.apex-*.tmp` leftovers); conversation threads are PINNED to the account that owns them — rotation to another account raises `ThreadResetByFailover` and the engine re-sends full context on a fresh thread (this also explains historical "empty response" resets with multiple accounts).
+
+Also added: per-step token usage line (`[tokens: prompt … · completion … · total … | served: …]`) from `session_state._llm_usage`, and cookie-expiry warnings at startup (expired `session_id` disables the account; <7 days warns).
+
 ## 4.4 Internet-Sourced Skill Library (v1.5.0)
 
 The bundled packs were upgraded from hand-rolled to **adaptations of the most-recommended open agent skills**, researched from the 2026 ecosystem (consensus sources: [obra/superpowers](https://github.com/obra/superpowers) — MIT, the most-praised methodology collection; [VoltAgent/awesome-agent-skills](https://github.com/VoltAgent/awesome-agent-skills) aggregate; Anthropic's official skills).

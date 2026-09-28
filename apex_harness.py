@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.6.1"
+VERSION = "1.7.1"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -214,6 +214,11 @@ class AccountPool:
         ]
 
 
+class ThreadResetByFailover(RuntimeError):
+    """Raised when an upstream thread must be abandoned because it belongs to a
+    different account than the one now serving the request."""
+
+
 class GensparkClient:
     def __init__(self, cookie_spec: Optional[str] = None):
         self.pool = AccountPool()
@@ -221,6 +226,11 @@ class GensparkClient:
         self.project_id: Optional[str] = None
         self.last_index: int = -1
         self.last_served_model: Optional[str] = None
+        self.last_usage: Optional[Dict[str, Any]] = None
+        # A conversation thread lives on ONE account server-side. Rotating to
+        # another account with the same project_id silently breaks the thread
+        # (empty responses) — so threads are pinned to their owner account (#9).
+        self.project_owner: Optional[CookieAccount] = None
 
     def _load_pool(self, spec: Optional[str]):
         # 1. env var
@@ -268,6 +278,7 @@ class GensparkClient:
                         continue
                     seen_keys.add(key)
                     self.pool.add(p.name, raw)
+                    self._check_cookie_expiry(self.pool.accounts[-1], raw)
             except Exception as e:
                 print(C.s(f"  [warn] {p}: {e}", C.YELLOW))
 
@@ -276,6 +287,18 @@ class GensparkClient:
                 "No Genspark cookies found. Place cookies.json in the current directory "
                 "or set GENSPARK_COOKIES_JSON."
             )
+
+    @staticmethod
+    def _check_cookie_expiry(acc: "CookieAccount", raw: List[Dict[str, Any]]):
+        exp = next((c.get("expirationDate") for c in raw if c.get("name") == "session_id"), None)
+        if not isinstance(exp, (int, float)):
+            return
+        days = (exp - time.time()) / 86400
+        if days < 0:
+            acc.auth_error = True
+            print(C.s(f"  [warn] {acc.name}: session_id cookie is EXPIRED — account disabled", C.RED))
+        elif days < 7:
+            print(C.s(f"  [warn] {acc.name}: session_id expires in {days:.1f} days — re-export cookies soon", C.YELLOW))
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -302,7 +325,21 @@ class GensparkClient:
         last_err: Optional[Exception] = None
 
         for attempt in range(max_tries):
-            acc = self.pool.next_account()
+            # Thread stickiness: an existing thread MUST be served by the
+            # account that owns it (#9 — cross-account threads come back empty)
+            if (self.project_id is not None and self.project_owner is not None
+                    and self.project_owner.available()):
+                acc = self.project_owner
+            else:
+                acc = self.pool.next_account()
+                if (self.project_id is not None and self.project_owner is not None
+                        and acc is not self.project_owner):
+                    # owner is cooling down / dead — this thread can't continue
+                    self.reset_thread()
+                    raise ThreadResetByFailover(
+                        "conversation thread's account is unavailable; thread was reset "
+                        "and the task context will be re-sent on a fresh thread"
+                    )
             acc.req_count += 1
 
             mid = str(uuid.uuid4())
@@ -362,6 +399,7 @@ class GensparkClient:
                 r.raise_for_status()
 
                 text = ""
+                finished = False
                 for line in r.iter_lines(decode_unicode=True):
                     if not line or not line.startswith("data:"):
                         continue
@@ -392,20 +430,28 @@ class GensparkClient:
                         if m.get("content"):
                             text = m["content"]
                         # Authoritative: which model the server ACTUALLY ran
-                        served = (m.get("session_state") or {}).get("_llm_model")
+                        ss = m.get("session_state") or {}
+                        served = ss.get("_llm_model")
                         if served:
                             self.last_served_model = served
+                        u = ss.get("_llm_usage")
+                        if isinstance(u, dict):
+                            self.last_usage = u
                     elif (t == "project_field"
                           and j.get("field_name") == "status"
                           and j.get("field_value") == "FINISHED"):
+                        finished = True
                         break
 
                 acc.mark_ok()
+                self.project_owner = acc
                 return {
                     "text": text,
                     "project_id": self.project_id,
                     "last_index": self.last_index,
                     "served_model": self.last_served_model,
+                    "usage": self.last_usage,
+                    "finished": finished,
                 }
 
             except requests.HTTPError as e:
@@ -445,6 +491,7 @@ class GensparkClient:
     def reset_thread(self):
         self.project_id = None
         self.last_index = -1
+        self.project_owner = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -494,7 +541,15 @@ class _PosixShell:
             self._master = master
             self._child_pid = pid
             time.sleep(0.3)
+            # disable history expansion: interactive bash otherwise eats "!"
+            # in commands and reports the PREVIOUS command's exit code (#8)
+            try:
+                os.write(master, b"set +H\n")
+                time.sleep(0.15)
+            except OSError:
+                pass
             self._drain(0.5)
+            self.cwd = os.getcwd()
 
     def _drain(self, timeout: float = 0.3) -> str:
         parts: List[str] = []
@@ -525,11 +580,12 @@ class _PosixShell:
 
     def _run_once(self, command: str, timeout: int) -> Tuple[str, int]:
         with self._lock:
-            # send command + sentinel
+            # send command + sentinel; sentinel carries the shell's cwd so file
+            # tools can resolve relative paths against it (#9)
             sentinel_cmd = (
                 f"{command}\n"
                 f"__apex_ec=$?\n"
-                f"echo \"{self._sentinel}:$__apex_ec\"\n"
+                f"echo \"{self._sentinel}:$__apex_ec@CWD@$PWD\"\n"
             )
             os.write(self._master, sentinel_cmd.encode())
 
@@ -537,13 +593,14 @@ class _PosixShell:
             t0 = time.time()
             exit_code = -1
             eof = False
+            timed_out = False
+            marker = f"{self._sentinel}:"
 
             while True:
                 elapsed = time.time() - t0
                 left = timeout - elapsed
                 if left <= 0:
-                    parts.append(f"\n[timed out after {timeout}s]")
-                    exit_code = 124
+                    timed_out = True
                     break
 
                 rd, _, _ = select.select([self._master], [], [], min(left, 0.15))
@@ -559,17 +616,67 @@ class _PosixShell:
                         break
 
                 combined = "".join(parts)
-                marker = f"{self._sentinel}:"
                 if marker in combined:
                     idx = combined.rfind(marker)
                     tail = combined[idx + len(marker):].strip()
                     try:
-                        exit_code = int(tail.split()[0].split("\n")[0].split("\r")[0])
+                        ec_part = tail.split("@CWD@", 1)[0]
+                        exit_code = int(ec_part.split()[0].split("\n")[0].split("\r")[0])
                     except (ValueError, IndexError):
                         exit_code = 0
+                    if "@CWD@" in tail:
+                        self.cwd = tail.split("@CWD@", 1)[1].split("\n")[0].strip() or self.cwd
                     combined = combined[:idx]
                     parts = [combined]
                     break
+
+            if timed_out:
+                # Interrupt the foreground command (Ctrl+C to the PTY's process
+                # group) so the session stays SYNCHRONIZED — without this,
+                # every subsequent command returns the previous command's
+                # output (#4). \x03 also flushes the PTY's queued input, so the
+                # sentinel lines are RE-SENT afterwards: when the command is
+                # interruptible the shell (and its cwd/env state) survives;
+                # only a truly unkillable command costs a restart (N4).
+                try:
+                    os.write(self._master, b"\x03")
+                except OSError:
+                    pass
+                time.sleep(0.2)
+                try:
+                    os.write(self._master, f'echo "{marker}$?@CWD@$PWD"\n'.encode())
+                except OSError:
+                    pass
+                deadline = time.time() + 5
+                got_marker = False
+                while time.time() < deadline:
+                    rd, _, _ = select.select([self._master], [], [], 0.2)
+                    if rd:
+                        try:
+                            chunk = os.read(self._master, 32768)
+                            if not chunk:
+                                break
+                            parts.append(chunk.decode("utf-8", errors="replace"))
+                        except OSError:
+                            break
+                    if marker in "".join(parts):
+                        got_marker = True
+                        break
+                combined = "".join(parts)
+                if got_marker and marker in combined:
+                    idx = combined.rfind(marker)
+                    parts = [combined[:idx]]
+                    exit_code = 124
+                    parts.append(f"\n[timed out after {timeout}s — command interrupted]")
+                else:
+                    # Command ignored Ctrl+C and the sentinel never came: the
+                    # only correct recovery is a fresh shell (state is lost,
+                    # but outputs stay truthful)
+                    self.close()
+                    self._start()
+                    parts.append(f"\n[timed out after {timeout}s — command could not be interrupted; "
+                                 f"persistent shell was restarted (cwd/env state reset)]")
+                    exit_code = 124
 
             if eof and exit_code == -1:
                 # bash died mid-command — surface it so the caller can restart
@@ -625,6 +732,7 @@ class _WindowsShell:
         self._sentinel = f"__APEX_{uuid.uuid4().hex[:8]}__"
         self._lock = threading.Lock()
         self._desync = False
+        self.cwd = os.getcwd()
         self._queue: "queue.Queue[str]" = queue.Queue()
         self._start()
 
@@ -678,13 +786,13 @@ class _WindowsShell:
             marker = f"{self._sentinel}:"
             try:
                 self._proc.stdin.write(f"{command}{self._nl}")
-                self._proc.stdin.write(f"echo {marker}{self._ec_expr}{self._nl}")
+                self._proc.stdin.write(f"echo {marker}{self._ec_expr}@CWD@%CD%{self._nl}")
                 self._proc.stdin.flush()
             except OSError:
                 self._start()
                 assert self._proc and self._proc.stdin
                 self._proc.stdin.write(f"{command}{self._nl}")
-                self._proc.stdin.write(f"echo {marker}{self._ec_expr}{self._nl}")
+                self._proc.stdin.write(f"echo {marker}{self._ec_expr}@CWD@%CD%{self._nl}")
                 self._proc.stdin.flush()
 
             parts: List[str] = []
@@ -708,10 +816,13 @@ class _WindowsShell:
                     return "[shell restarted: previous shell process terminated]", 1
                 s = item.rstrip("\r\n")
                 if s.startswith(marker):
+                    tail = s[len(marker):].strip()
                     try:
-                        exit_code = int(s[len(marker):].strip())
+                        exit_code = int(tail.split("@CWD@", 1)[0].strip())
                     except ValueError:
                         exit_code = 0
+                    if "@CWD@" in tail:
+                        self.cwd = tail.split("@CWD@", 1)[1].strip() or self.cwd
                     break
                 parts.append(s)
 
@@ -724,6 +835,10 @@ class _WindowsShell:
             try:
                 item = self._queue.get(timeout=0.2)
             except queue.Empty:
+                # stale command is still hung — a fresh shell is the only way
+                # to keep outputs truthful (state is lost, correctness isn't)
+                self.close()
+                self._start()
                 self._desync = False
                 return
             if item is None:
@@ -859,6 +974,38 @@ class ToolRegistry:
         self.snaps = snaps
         self.skills = skills
 
+    def _resolve(self, path: str) -> Path:
+        """Resolve a tool path against the SHELL's cwd, not the harness's —
+        a `cd` in bash must affect where relative file tools land (#9)."""
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            base = getattr(self.shell, "cwd", None) or os.getcwd()
+            p = Path(base) / p
+        return p
+
+    def _read_preserved(self, p: Path) -> Tuple[str, bool]:
+        """Read keeping the file's own line endings. Returns (lf_text, was_crlf)."""
+        with open(p, "r", encoding="utf-8", errors="replace", newline="") as f:
+            raw = f.read()
+        crlf = "\r\n" in raw
+        return (raw.replace("\r\n", "\n") if crlf else raw), crlf
+
+    def _atomic_write(self, p: Path, text_lf: str, crlf: bool):
+        """Write via temp file + os.replace so a crash can never leave a
+        half-written file (#9)."""
+        out = text_lf.replace("\n", "\r\n") if crlf else text_lf
+        tmp = p.parent / f".{p.name}.apex-{uuid.uuid4().hex[:8]}.tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8", newline="") as f:
+                f.write(out)
+            os.replace(tmp, p)
+        finally:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+
     def skill(self, name: str) -> str:
         if not (name or "").strip():
             return "[error] skill name required (e.g. <tool name=\"skill\" name=\"git-workflow\">)"
@@ -875,7 +1022,7 @@ class ToolRegistry:
         return f"{output}{suffix}".strip() or "[no output]"
 
     def read_file(self, path: str, offset: int = 1, limit: int = 0) -> str:
-        p = Path(path).expanduser()
+        p = self._resolve(path)
         if not p.exists():
             return f"[error] File not found: {path}"
         if not p.is_file():
@@ -891,7 +1038,7 @@ class ToolRegistry:
             end = start + limit
             selected = lines[start:end]
             numbered = [f"{i+start+1:5d} | {l}" for i, l in enumerate(selected)]
-            header = f"[{path}] {total} lines, showing {start+1}–{min(end, total)}"
+            header = f"[{p}] {total} lines, showing {start+1}–{min(end, total)}"
             body = f"{header}\n" + "\n".join(numbered)
             if end < total:
                 body += (
@@ -904,24 +1051,28 @@ class ToolRegistry:
             return f"[error] {path}: {e}"
 
     def write_file(self, path: str, content: str) -> str:
-        p = Path(path).expanduser()
+        p = self._resolve(path)
         try:
             if content and not content.endswith("\n"):
                 content += "\n"
             self.snaps.save(str(p), "write")
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content)
+            _, crlf = self._read_preserved(p) if p.exists() else ("", False)
+            self._atomic_write(p, content, crlf)
             n = content.count("\n")
-            return f"[wrote {path} — {n} lines, {len(content)} bytes]"
+            return f"[wrote {p} — {n} lines, {len(content)} bytes]"
         except Exception as e:
             return f"[error] write {path}: {e}"
 
     def edit_file(self, path: str, old_string: str, new_string: str) -> str:
-        p = Path(path).expanduser()
+        p = self._resolve(path)
         if not p.exists():
             return f"[error] File not found: {path}"
+        if not old_string:
+            # "".count("") == 1 would fake success on an empty file (N1)
+            return "[error] edit_file: old_string is empty. Use write_file to overwrite a file."
         try:
-            text = p.read_text()
+            text, crlf = self._read_preserved(p)
             count = text.count(old_string)
             if count == 0:
                 return (
@@ -932,18 +1083,18 @@ class ToolRegistry:
                 return f"[error] old_string matches {count} places in {path}. Be more specific."
             self.snaps.save(str(p), "edit")
             new_text = text.replace(old_string, new_string, 1)
-            p.write_text(new_text)
+            self._atomic_write(p, new_text, crlf)
             diff = "\n".join(difflib.unified_diff(
                 old_string.splitlines(keepends=True),
                 new_string.splitlines(keepends=True),
                 fromfile=f"a/{p.name}", tofile=f"b/{p.name}", lineterm="",
             ))
-            return f"[edited {path}]\n{self._truncate(diff)}"
+            return f"[edited {p}]\n{self._truncate(diff)}"
         except Exception as e:
             return f"[error] edit {path}: {e}"
 
     def list_dir(self, path: str = ".", depth: int = 3) -> str:
-        p = Path(path).expanduser().resolve()
+        p = self._resolve(path)
         if not p.exists():
             return f"[error] Not found: {path}"
         if not p.is_dir():
@@ -973,41 +1124,36 @@ class ToolRegistry:
         return "\n".join(lines[:300]) or "[empty]"
 
     def grep(self, pattern: str, path: str = ".", include: str = "") -> str:
-        if not _POSIX:
-            return self._grep_python(pattern, path, include)
-        inc = f"--include='{include}'" if include else ""
-        cmd = (
-            f"grep -rn --color=never {inc} -E '{pattern}' '{path}' "
-            f"--exclude-dir=.git --exclude-dir=node_modules "
-            f"--exclude-dir=__pycache__ --exclude-dir=.venv "
-            f"2>/dev/null | head -80"
-        )
-        out, _ = self.shell.run(cmd, timeout=15)
-        return self._truncate(out) or "[no matches]"
+        # Pure-Python on ALL platforms: shell-built grep was injectable (a '
+        # hung it; a crafted pattern executed commands — finding #6) and the
+        # same implementation everywhere keeps results identical.
+        return self._grep_python(pattern, path, include)
 
     def _grep_python(self, pattern: str, path: str = ".", include: str = "",
                      max_results: int = 80) -> str:
-        """Pure-Python recursive regex search (Windows path — no shell grep)."""
+        """Pure-Python recursive regex search — no shell involved."""
         try:
             rx = re.compile(pattern)
         except re.error as e:
             return f"[error] invalid regex: {e}"
-        base = Path(path).expanduser()
+        base = self._resolve(path)
         if not base.exists():
             return f"[error] Not found: {path}"
         ignore_dirs = {".git", "node_modules", "__pycache__", ".venv", ".tox", ".idea", ".vscode"}
         results: List[str] = []
         files = [base] if base.is_file() else []
         if not files:
+            scanned = 0
             for root, dirs, names in os.walk(base):
                 dirs[:] = [d for d in sorted(dirs) if d not in ignore_dirs]
                 for n in sorted(names):
+                    scanned += 1
+                    if scanned > 20_000:
+                        break
                     if include and not fnmatch.fnmatch(n, include):
                         continue
                     files.append(Path(root) / n)
-                    if len(results) >= max_results:
-                        break
-                if len(results) >= max_results:
+                if len(files) > 20_000:
                     break
         for f in files:
             if len(results) >= max_results:
@@ -1054,6 +1200,10 @@ class ToolCall:
 
 class ToolParser:
     NAMES = {"bash", "read_file", "write_file", "edit_file", "list_dir", "grep", "skill"}
+    # Only tags with a valid header open a tool call — bare "<tool" mentions in
+    # prose must never affect nesting (external-review finding #5)
+    OPEN_RE = re.compile(r'<tool\s+name=["\'](\w+)["\']([^>]*)>')
+    CLOSE_RE = re.compile(r'</tool\s*>')
 
     MD_BASH_RE = re.compile(r'```(?:bash|sh|shell)\s*\n(.*?)\n\s*```', re.DOTALL)
 
@@ -1086,61 +1236,108 @@ class ToolParser:
                 i = tag_start + 5
                 continue
 
-            tag_open_end = text.find(">", tag_start)
-            if tag_open_end == -1:
-                break
-
-            header = text[tag_start:tag_open_end + 1]
-            m = re.match(r'<tool\s+name=["\'](\w+)["\']([^>]*)>', header)
+            m = cls.OPEN_RE.match(text, tag_start)
             if not m:
-                i = tag_open_end + 1
+                # "<tool" without a valid header (a mention like "<tool…" in prose) — content, not a tag
+                i = tag_start + 5
                 continue
 
+            tag_open_end = m.end() - 1
             name = m.group(1).lower()
-            attrs_str = m.group(2)
-            if name not in cls.NAMES:
-                i = tag_open_end + 1
-                continue
+            attrs_str = m.group(2) or ""
 
             attrs = cls._attrs(attrs_str)
 
-            # Balanced tag finder (handles nested <tool> inside write_file/edit_file)
-            depth = 1
-            pos = tag_open_end + 1
-            body_start = pos
-            closing_tag_end = len(text)
-            body = text[body_start:]
+            # Balanced tag finder (handles nested VALID tool tags inside
+            # write_file/edit_file bodies). Bare "<tool" mentions without a
+            # valid header never bump depth (#5), and an unclosed nested open
+            # (docs showing `<tool name="bash">ls` with no close) is retried
+            # as plain content via backtracking instead of swallowing the
+            # outer close.
+            body_start = m.end()
 
-            while pos < len(text):
-                next_open = text.find("<tool", pos)
-                next_close = text.find("</tool>", pos)
-
-                if next_close == -1:
-                    # Unclosed tool tag at end of message (e.g. truncated stream)
-                    body = text[body_start:]
-                    closing_tag_end = len(text)
-                    pos = len(text)
-                    break
-
-                if next_open != -1 and next_open < next_close:
-                    # Inner <tool tag (nested example inside code/docs)
-                    depth += 1
-                    pos = next_open + 5
-                else:
-                    depth -= 1
-                    if depth == 0:
-                        closing_tag_end = next_close + 7
-                        body = text[body_start:next_close]
-                        pos = closing_tag_end
-                        break
+            def scan(skip: Set[int]) -> Tuple[Optional[str], Optional[int], bool, List[int]]:
+                """Returns (body, close_end, saw_any_close, nested_open_positions)."""
+                depth = 1
+                pos = body_start
+                nested_positions: List[int] = []
+                saw_close = False
+                while pos < len(text):
+                    close_m2 = cls.CLOSE_RE.search(text, pos)
+                    if not close_m2:
+                        return None, None, saw_close, nested_positions
+                    saw_close = True
+                    nested = None
+                    scan_pos = pos
+                    while True:
+                        cand = text.find("<tool", scan_pos)
+                        if cand == -1 or cand >= close_m2.start():
+                            break
+                        if cand in skip:
+                            scan_pos = cand + 5
+                            continue
+                        if cls.OPEN_RE.match(text, cand):
+                            nested = cand
+                            break
+                        scan_pos = cand + 5
+                    if nested is not None:
+                        depth += 1
+                        nested_positions.append(nested)
+                        pos = nested + 5
                     else:
-                        pos = next_close + 7
+                        depth -= 1
+                        if depth == 0:
+                            return text[body_start:close_m2.start()], close_m2.end(), True, nested_positions
+                        pos = close_m2.end()
+                return None, None, saw_close, nested_positions
+
+            body, close_end, saw_close, nested_positions = scan(set())
+            if body is None and nested_positions:
+                # Ambiguity: some nested open(s) never closed (e.g. docs showing
+                # `<tool name="bash">ls` with no close). Backtrack with the
+                # SMALLEST set of nested-opens-treated-as-content that resolves
+                # the outer tag — one skip, then pairs, capped for safety (N2).
+                from itertools import combinations
+                max_combo = min(len(nested_positions), 4)
+                for size in range(1, max_combo + 1):
+                    resolved = False
+                    for combo in combinations(nested_positions, size):
+                        b2, e2, _, _ = scan(set(combo))
+                        if b2 is not None:
+                            body, close_end = b2, e2
+                            resolved = True
+                            break
+                    if resolved:
+                        break
+            if body is None and saw_close:
+                # Closes exist but no interpretation resolves: the tag is
+                # malformed — refuse it instead of salvaging message tail into
+                # a file (N3). The task continues via the error result.
+                cleaned_parts.append(text[last_end:tag_start])
+                calls.append(ToolCall(
+                    name=name,
+                    args={"parse_error": ("malformed tool tag: nesting could not be resolved. "
+                                          "Re-issue the tool call with its complete body and closing </tool>.")},
+                    raw=text[tag_start:],
+                ))
+                last_end = len(text)
+                i = len(text)
+                continue
+            if body is None:
+                # No close anywhere: genuinely truncated at EOF — salvage what
+                # arrived (the engine refuses to execute unfinished streams)
+                body = text[body_start:]
+                close_end = len(text)
+                pos = len(text)
+            else:
+                pos = close_end
 
             cleaned_parts.append(text[last_end:tag_start])
-            args = cls._build(name, attrs, body.strip())
-            raw_tag = text[tag_start:closing_tag_end]
+            # Uniform tag-relative indentation would corrupt file content — dedent, then trim
+            args = cls._build(name, attrs, textwrap.dedent(body).strip())
+            raw_tag = text[tag_start:close_end]
             calls.append(ToolCall(name=name, args=args, raw=raw_tag))
-            last_end = closing_tag_end
+            last_end = close_end
             i = pos
 
         cleaned_parts.append(text[last_end:])
@@ -1225,19 +1422,30 @@ class ToolParser:
         return {m.group(1): m.group(2) for m in re.finditer(r'(\w+)\s*=\s*["\']([^"\']*)["\']', s)}
 
     @staticmethod
-    def _build(name: str, attrs: Dict[str, str], body: str) -> Dict[str, Any]:
+    @staticmethod
+    def _safe_int(v: Any) -> Optional[int]:
+        try:
+            return int(str(v).strip())
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _build(cls, name: str, attrs: Dict[str, str], body: str) -> Dict[str, Any]:
         if name == "bash":
             a: Dict[str, Any] = {"command": body}
-            if "timeout" in attrs:
-                a["timeout"] = attrs["timeout"]
+            t = cls._safe_int(attrs.get("timeout"))
+            if t is not None:
+                a["timeout"] = t
             return a
         elif name == "read_file":
             path = attrs.get("path") or attrs.get("file") or attrs.get("filepath") or body
             a = {"path": path}
-            if "offset" in attrs:
-                a["offset"] = int(attrs["offset"])
-            if "limit" in attrs:
-                a["limit"] = int(attrs["limit"])
+            off = cls._safe_int(attrs.get("offset"))
+            lim = cls._safe_int(attrs.get("limit"))
+            if off is not None:
+                a["offset"] = off
+            if lim is not None:
+                a["limit"] = lim
             return a
         elif name == "write_file":
             path = attrs.get("path") or attrs.get("file") or attrs.get("filepath") or ""
@@ -1250,20 +1458,26 @@ class ToolParser:
             return {"path": path, "content": body}
         elif name == "edit_file":
             path = attrs.get("path") or attrs.get("file") or attrs.get("filepath") or ""
-            parts = re.split(r'\n-{3,}\s*\n', body, maxsplit=1)
+            # Separator may be indented when the model indents the tag body (finding #3)
+            parts = re.split(r'\n[ \t]*-{3,}[ \t]*\n', body, maxsplit=1)
             if len(parts) == 2:
                 return {"path": path, "old_string": parts[0], "new_string": parts[1]}
             try:
                 j = json.loads(body)
-                if isinstance(j, dict):
+                if isinstance(j, dict) and "old_string" in j:
                     return {"path": path, **j}
             except Exception:
                 pass
-            return {"path": path, "old_string": body, "new_string": ""}
+            # NO separator: refuse to edit — replacing old with "" would delete
+            # the matched code while reporting success (finding #3)
+            return {"path": path,
+                    "edit_error": ("edit_file body must be '<old text>' then a line containing "
+                                   "only '---' then '<new text>'. No separator found — nothing was replaced.")}
         elif name == "list_dir":
             a = {"path": attrs.get("path", body or ".")}
-            if "depth" in attrs:
-                a["depth"] = int(attrs["depth"])
+            d = cls._safe_int(attrs.get("depth"))
+            if d is not None:
+                a["depth"] = d
             return a
         elif name == "grep":
             return {
@@ -1273,7 +1487,9 @@ class ToolParser:
             }
         elif name == "skill":
             return {"name": attrs.get("name") or attrs.get("skill") or body}
-        return {}
+        # Unknown tool names become calls too, so the task CONTINUES with a
+        # self-correcting error instead of ending as if it finished (#8)
+        return {"tool": name, "body": body}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1479,6 +1695,7 @@ class AgentEngine:
         self.skills = skills
         self.pending_skills: List[Tuple[str, str]] = []
         self._warned_pairs: Set[Tuple[str, str]] = set()
+        self._unfinished_retry = False
         self._stop = False
 
     def run(self, user_input: str) -> str:
@@ -1493,6 +1710,7 @@ class AgentEngine:
 
     def _run_loop(self, user_input: str) -> str:
         self._stop = False
+        self._unfinished_retry = False
         self.ctx.add("user", user_input)
         system = _system_prompt(self.skills)
 
@@ -1536,6 +1754,22 @@ class AgentEngine:
                 self._stop = True
                 print(C.s("\n  [interrupted]", C.YELLOW))
                 break
+            except ThreadResetByFailover as e:
+                # The thread's owner account is gone — retry THIS step on a
+                # fresh thread carrying the full local context.
+                print(C.s(f"\n  [thread failover: {e} — re-sending full context]", C.YELLOW))
+                try:
+                    result = self.client.stream(
+                        query=self.ctx.build_prompt(system),
+                        model=self.model,
+                        enable_search=self.search,
+                        moa_models=self.moa,
+                        on_delta=lambda d: renderer.on_delta(d, self.model),
+                    )
+                except Exception as e2:
+                    print(C.s(f"\n  [upstream error after failover: {e2}]", C.RED))
+                    self.ctx.add("tool_result", f"[upstream error: {e2}]", tool_name="error", step=step)
+                    break
             except Exception as e:
                 renderer.stop()
                 msg = f"[upstream error: {e}]"
@@ -1544,6 +1778,15 @@ class AgentEngine:
                 break
             finally:
                 renderer.stop()
+
+            usage = result.get("usage") or {}
+            if usage.get("total_tokens"):
+                print(C.s(
+                    f"  [tokens: prompt {usage.get('prompt_tokens', '?')} · "
+                    f"completion {usage.get('completion_tokens', '?')} · "
+                    f"total {usage.get('total_tokens', '?')} | "
+                    f"served: {result.get('served_model') or '?'}]", C.DIM
+                ))
 
             # Guard: did Genspark actually honor the requested model?
             served = result.get("served_model")
@@ -1558,6 +1801,23 @@ class AgentEngine:
                     ))
 
             text = result.get("text", "")
+
+            # Truncated-stream protection (#7): if the stream ended without the
+            # FINISHED event, a tool tag may be half-written — executing it
+            # would create a half-finished file, and a partial prose reply is
+            # not a real answer. Retry the SAME step once; give up on the second.
+            finished = result.get("finished", True)
+            opens = len(ToolParser.OPEN_RE.findall(text))
+            closes = len(ToolParser.CLOSE_RE.findall(text))
+            if not finished and (opens > closes or not text.strip()):
+                if not self._unfinished_retry:
+                    self._unfinished_retry = True
+                    print(C.s("\n  [stream cut off before completion — re-asking this step...]", C.YELLOW))
+                    step -= 1
+                    continue
+                print(C.s("\n  [stream cut off twice — ending task. Re-run to continue.]", C.RED))
+                break
+
             if not text.strip():
                 # Server-side thread dropped or returned empty; reset and retry with compacted context
                 print(C.s("\n  [empty response — resetting thread session and continuing with context...]", C.YELLOW))
@@ -1580,7 +1840,13 @@ class AgentEngine:
                 finally:
                     renderer.stop()
 
-            cleaned, calls = ToolParser.parse(text)
+            try:
+                cleaned, calls = ToolParser.parse(text)
+            except Exception as e:
+                # the parser must never take the whole task down (#8)
+                print(C.s(f"\n  [parser error: {e} — treating response as final text]", C.RED))
+                cleaned, calls = text, []
+
             self.ctx.add("assistant", text, step=step)
 
             if not calls:
@@ -1630,6 +1896,10 @@ class AgentEngine:
                     content=a.get("content", ""),
                 )
             elif tc.name == "edit_file":
+                if a.get("edit_error"):
+                    # parser refused the edit (no --- separator) — surface it
+                    # instead of calling edit_file with empty strings (N1)
+                    return f"[error] {a['edit_error']}"
                 return self.tools.edit_file(
                     path=a.get("path", ""),
                     old_string=a.get("old_string", ""),
@@ -1649,7 +1919,8 @@ class AgentEngine:
             elif tc.name == "skill":
                 return self.tools.skill(name=a.get("name", ""))
             else:
-                return f"[error] Unknown tool: {tc.name}"
+                return (f"[error] unknown tool '{tc.name}'. Available tools: "
+                        f"{', '.join(sorted(ToolParser.NAMES))}. Re-issue your action with one of these.")
         except Exception as e:
             return f"[tool error] {tc.name}: {e}"
 
