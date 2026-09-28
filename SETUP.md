@@ -83,6 +83,28 @@ If you see the numbered answer, you're done. Launch the interactive REPL with `.
 
 ---
 
+### Optional — install `apex` globally
+
+Run Apex from ANY directory (cookies and skills still resolve automatically):
+
+```bash
+# Linux / macOS
+mkdir -p ~/.local/bin && ln -sf "$(pwd)/apex" ~/.local/bin/apex
+apex --version        # works from anywhere
+```
+
+```cmd
+:: Windows — add the repo folder to PATH, or copy apex.cmd's target
+setx PATH "%PATH%;C:\path\to\apex-harness"
+```
+
+Resolution order when running globally:
+- **cookies**: `./cookies.json` in the current project wins, else falls back to the cookies next to `apex_harness.py`
+- **skills**: bundled `skills/` always load; project-local `.apex/skills/` comes from wherever you invoke apex
+- **history**: shared at `~/.apex/history`
+
+---
+
 ## 3. Platform behavior
 
 | | Linux / macOS | Windows |

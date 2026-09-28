@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.7.1"
+VERSION = "1.7.2"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -283,9 +283,23 @@ class GensparkClient:
                 print(C.s(f"  [warn] {p}: {e}", C.YELLOW))
 
         if not self.pool.accounts:
+            # Global install: running `apex` from an arbitrary directory —
+            # fall back to the cookies that live next to the harness itself.
+            home_dir = Path(__file__).resolve().parent
+            fallback = home_dir / "cookies.json"
+            if fallback.exists():
+                try:
+                    raw = json.loads(fallback.read_text())
+                    if isinstance(raw, list) and raw:
+                        self.pool.add(str(fallback), raw)
+                        self._check_cookie_expiry(self.pool.accounts[-1], raw)
+                except Exception as e:
+                    print(C.s(f"  [warn] {fallback}: {e}", C.YELLOW))
+
+        if not self.pool.accounts:
             raise RuntimeError(
                 "No Genspark cookies found. Place cookies.json in the current directory "
-                "or set GENSPARK_COOKIES_JSON."
+                "(project-specific) or next to apex_harness.py, or set GENSPARK_COOKIES_JSON."
             )
 
     @staticmethod
