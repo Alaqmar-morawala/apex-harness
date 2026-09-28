@@ -58,12 +58,13 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
-# "opus-5.5"/"claude-opus-5.5" are NOT real Genspark ids — they silently serve
-# claude-sonnet-4-5. The top honored Claude is claude-opus-5.
-DEFAULT_MODEL = "claude-opus-5"
+# "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
+# Dot-variant ids ("opus-5.5", "claude-opus-5.5") are NOT real — they silently
+# serve claude-sonnet-4-5. The substitution guard catches any future mismatch.
+DEFAULT_MODEL = "claude-opus-5-5"
 MAX_STEPS_DEFAULT = 30
 SHELL_TIMEOUT = 120
 OUTPUT_HEAD = 60
@@ -95,6 +96,7 @@ class C:
 
 
 MODEL_CATALOG: Dict[str, Dict[str, str]] = {
+    "claude-opus-5-5":            {"label": "Claude Opus 5.5",         "tier": "5x",   "cls": "reasoning"},
     "claude-opus-5":              {"label": "Claude Opus 5",           "tier": "5x",   "cls": "reasoning"},
     "claude-opus-4-8":            {"label": "Claude Opus 4.8",         "tier": "5x",   "cls": "reasoning"},
     "claude-opus-4-7":            {"label": "Claude Opus 4.7",         "tier": "5x",   "cls": "reasoning"},
