@@ -58,9 +58,12 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
-DEFAULT_MODEL = "opus-5.5"
+# VERIFIED via message_result.session_state._llm_model (server-reported):
+# "opus-5.5"/"claude-opus-5.5" are NOT real Genspark ids — they silently serve
+# claude-sonnet-4-5. The top honored Claude is claude-opus-5.
+DEFAULT_MODEL = "claude-opus-5"
 MAX_STEPS_DEFAULT = 30
 SHELL_TIMEOUT = 120
 OUTPUT_HEAD = 60
@@ -92,8 +95,6 @@ class C:
 
 
 MODEL_CATALOG: Dict[str, Dict[str, str]] = {
-    "opus-5.5":                   {"label": "Claude Opus 5.5",         "tier": "5x",   "cls": "reasoning"},
-    "claude-opus-5.5":            {"label": "Claude Opus 5.5",         "tier": "5x",   "cls": "reasoning"},
     "claude-opus-5":              {"label": "Claude Opus 5",           "tier": "5x",   "cls": "reasoning"},
     "claude-opus-4-8":            {"label": "Claude Opus 4.8",         "tier": "5x",   "cls": "reasoning"},
     "claude-opus-4-7":            {"label": "Claude Opus 4.7",         "tier": "5x",   "cls": "reasoning"},
@@ -217,6 +218,7 @@ class GensparkClient:
         self._load_pool(cookie_spec)
         self.project_id: Optional[str] = None
         self.last_index: int = -1
+        self.last_served_model: Optional[str] = None
 
     def _load_pool(self, spec: Optional[str]):
         # 1. env var
@@ -387,6 +389,10 @@ class GensparkClient:
                         m = j.get("message") or {}
                         if m.get("content"):
                             text = m["content"]
+                        # Authoritative: which model the server ACTUALLY ran
+                        served = (m.get("session_state") or {}).get("_llm_model")
+                        if served:
+                            self.last_served_model = served
                     elif (t == "project_field"
                           and j.get("field_name") == "status"
                           and j.get("field_value") == "FINISHED"):
@@ -397,6 +403,7 @@ class GensparkClient:
                     "text": text,
                     "project_id": self.project_id,
                     "last_index": self.last_index,
+                    "served_model": self.last_served_model,
                 }
 
             except requests.HTTPError as e:
@@ -1440,6 +1447,15 @@ def _system_prompt(skills: Optional[SkillStore] = None) -> str:
     """)
 
 
+def _model_matches(requested: str, served: Optional[str]) -> bool:
+    """True if the server-honored model matches the request. Serving variants
+    (e.g. 'claude-opus-4-8-extended-cache' for 'claude-opus-4-8') count as a
+    match; a different model family is a silent substitution."""
+    if not served:
+        return True
+    return served == requested or served.startswith(requested + "-")
+
+
 class AgentEngine:
     def __init__(
         self,
@@ -1460,6 +1476,7 @@ class AgentEngine:
         self.moa: Optional[List[str]] = None
         self.skills = skills
         self.pending_skills: List[Tuple[str, str]] = []
+        self._warned_pairs: Set[Tuple[str, str]] = set()
         self._stop = False
 
     def run(self, user_input: str) -> str:
@@ -1525,6 +1542,18 @@ class AgentEngine:
                 break
             finally:
                 renderer.stop()
+
+            # Guard: did Genspark actually honor the requested model?
+            served = result.get("served_model")
+            if served and not _model_matches(self.model, served):
+                key = (self.model, served)
+                if key not in self._warned_pairs:
+                    self._warned_pairs.add(key)
+                    print(C.s(
+                        f"  [warn] requested '{self.model}' but Genspark served "
+                        f"'{served}' — invalid model id, silently substituted. "
+                        f"Use /model to pick a verified id.", C.RED
+                    ))
 
             text = result.get("text", "")
             if not text.strip():

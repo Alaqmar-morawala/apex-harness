@@ -132,7 +132,7 @@ Skills are reusable instruction packs the model loads on demand (progressive dis
 
 Apex provides access to the complete Genspark model fleet, including:
 
-- **Coding & General SOTA**: `claude-sonnet-5` (default), `claude-sonnet-4-6`, `gpt-5.6-sol`, `gpt-5.5`, `gpt-5.4`, `gemini-3.1-pro-preview`, `grok-4.6`, `deepseek-v4-pro`, `kimi-k3`
-- **Reasoning**: `claude-opus-5`, `claude-opus-4-8`, `gpt-5.5-pro`, `gpt-5.4-pro`, `gpt-5.2-pro`
+- **Coding & General SOTA**: `claude-sonnet-5`, `claude-sonnet-4-6`, `gpt-5.6-sol`, `gpt-5.5`, `gpt-5.4`, `gemini-3.1-pro-preview`, `grok-4.6`, `deepseek-v4-pro`, `kimi-k3`
+- **Reasoning**: `claude-opus-5` (**default** — the top honored Claude; note `opus-5.5` is not a real Genspark id and silently serves Sonnet 4.5), `claude-opus-4-8`, `gpt-5.5-pro`, `gpt-5.4-pro`, `gpt-5.2-pro`
 - **Fast / Lightweight**: `claude-4-5-haiku`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gpt-5.6-luna`, `gpt-5.4-nano`, `minimax-m3`
 - **Mixture-of-Agents (MoA)**: Run multi-model consensus via `/model genspark-moa` (combining GPT-5.1, Claude Sonnet 4.6, and Gemini 3.1 Pro).

@@ -90,7 +90,7 @@ Instead of forcing Genspark through an external intermediary harness, **Apex Har
 - **Payload Schema**:
   ```json
   {
-      "ai_chat_model": "opus-5.5",
+      "ai_chat_model": "claude-opus-5",
       "ai_chat_enable_search": false,
       "ai_chat_disable_personalization": false,
       "use_moa_proxy": false,
@@ -250,13 +250,15 @@ The bundled packs were upgraded from hand-rolled to **adaptations of the most-re
 
 ## 5. Model Catalog Reference
 
-The default model is configured as **`opus-5.5`** in `apex_harness.py`:
+The default model is **`claude-opus-5`** — verified via the server-reported `message_result.session_state._llm_model` field.
+
+> **Model truth (v1.6.0):** `opus-5.5` and `claude-opus-5.5` are **not real Genspark ids** — the API accepts them (HTTP 200) but silently serves `claude-sonnet-4-5-20250929`. Probe evidence (2026-09-28): `claude-opus-5` honored; `claude-opus-4-8`/`-4-7` honored as `...-extended-cache` serving variants; `opus-5.5`/`claude-opus-5.5` → Sonnet 4.5. The harness now warns loudly on any silent substitution (`_model_matches()` guard in the engine loop).
 
 | Model ID | Label | Tier | Class | Notes |
 |---|---|---|---|---|
-| `opus-5.5` | Claude Opus 5.5 | **5x** | Reasoning | **Current Default**. Exceptional coding & tool execution |
-| `claude-opus-5.5` | Claude Opus 5.5 | 5x | Reasoning | Alias for `opus-5.5` |
-| `claude-opus-5` | Claude Opus 5 | 5x | Reasoning | Prior flagship Opus |
+| `claude-opus-5` | Claude Opus 5 | **5x** | Reasoning | **Current Default**. Top honored Claude, verified |
+| `claude-opus-4-8` | Claude Opus 4.8 | 5x | Reasoning | Honored (serves as `-extended-cache` variant) |
+| `claude-opus-4-7` | Claude Opus 4.7 | 5x | Reasoning | Honored (serves as `-extended-cache` variant) |
 | `claude-sonnet-5` | Claude Sonnet 5 | 2x | Coding | High speed, strong coding |
 | `claude-sonnet-4-6` | Claude Sonnet 4.6 | 3x | Coding | Reliable coding workhorse |
 | `claude-4-5-haiku` | Claude Haiku 4.5 | 1x | Fast | Fast, lightweight tasks |
