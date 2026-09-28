@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.7.2"
+VERSION = "1.7.3"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -1804,7 +1804,9 @@ class AgentEngine:
 
             # Guard: did Genspark actually honor the requested model?
             served = result.get("served_model")
-            if served and not _model_matches(self.model, served):
+            # MoA ignores ai_chat_model server-side — a mismatch there is
+            # expected, not a substitution
+            if served and not self.moa and not _model_matches(self.model, served):
                 key = (self.model, served)
                 if key not in self._warned_pairs:
                     self._warned_pairs.add(key)
@@ -2105,6 +2107,9 @@ class ApexCLI:
             search=args.search,
             skills=self.skills,
         )
+        if args.model in ("genspark-moa", "mixture-of-agents"):
+            self.engine.moa = MOA_DEFAULT
+            self.engine.model = DEFAULT_MODEL
         self.query = args.query
 
         # readline history (POSIX; Windows console host provides basic line editing)
@@ -2173,27 +2178,31 @@ class ApexCLI:
 
         elif cmd == "/model":
             if arg:
-                if arg in MODEL_CATALOG:
-                    old = self.engine.model
+                if arg == "genspark-moa" or arg == "mixture-of-agents":
+                    old = self.engine.model + (" + MoA" if self.engine.moa else "")
+                    self.engine.moa = MOA_DEFAULT
+                    print(C.s(f"  {old} → Mixture-of-Agents ({' + '.join(MOA_DEFAULT)})", C.GREEN))
+                    print(C.s("  [MoA runs all three models per step — ~3x credit burn]", C.YELLOW))
+                elif arg in MODEL_CATALOG:
+                    old = self.engine.model + (" + MoA" if self.engine.moa else "")
                     self.engine.model = arg
                     self.engine.moa = None
                     t = MODEL_CATALOG[arg]["tier"]
                     print(C.s(f"  {old} → {arg} ({t})", C.GREEN))
-                elif arg == "genspark-moa":
-                    self.engine.moa = MOA_DEFAULT
-                    self.engine.model = "gpt-5.1-low"
-                    print(C.s("  Switched to Mixture-of-Agents", C.GREEN))
                 else:
                     print(C.s(f"  Unknown: {arg}", C.RED))
             else:
                 cur = self.engine.model
-                print(f"\n  {C.BOLD}Current:{C.RESET} {cur}")
-                if self.engine.moa:
-                    print(f"  {C.BOLD}MoA:{C.RESET} {', '.join(self.engine.moa)}")
+                moa_on = bool(self.engine.moa)
+                print(f"\n  {C.BOLD}Current:{C.RESET} {cur}" + (C.s("  + MoA", C.GREEN) if moa_on else ""))
+                if moa_on:
+                    print(f"  {C.BOLD}MoA ensemble:{C.RESET} {', '.join(self.engine.moa)}")
                 print(f"\n  {C.BOLD}Available:{C.RESET}")
                 for mid, info in MODEL_CATALOG.items():
-                    mark = " ◀" if mid == cur else ""
+                    mark = " ◀" if (mid == cur and not moa_on) else ""
                     print(f"    {C.CYAN}{mid:40s}{C.RESET} {info['tier']:>5s}  {C.DIM}{info['cls']}{C.RESET}{C.GREEN}{mark}{C.RESET}")
+                moa_mark = C.s(" ◀", C.GREEN) if moa_on else ""
+                print(f"    {C.CYAN}{'genspark-moa':40s}{C.RESET} {'MoA':>5s}  {C.DIM}ensemble: {' + '.join(MOA_DEFAULT)}{C.RESET}{C.GREEN}{moa_mark}{C.RESET}")
                 print()
 
         elif cmd == "/search":
