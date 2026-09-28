@@ -19,9 +19,13 @@ A native, single-file autonomous coding agent built for **Genspark models**. Ape
 
 ## Quickstart
 
+Full step-by-step instructions (dependencies, cookie export, per-platform notes) are in **[SETUP.md](SETUP.md)**.
+
 ```bash
 # requires: python3 with `requests` and `rich`, plus a valid cookies.json
-./apex                      # interactive REPL
+./apex                      # interactive REPL (Linux/macOS)
+apex.cmd                    # interactive REPL (Windows)
+python apex_harness.py      # works everywhere
 ./apex -q "create a flask hello world"        # single task
 ./apex --model gpt-5.6-sol --search           # pick model + web search
 ```
@@ -59,6 +63,7 @@ Full engineering detail — including the six critical bugs solved during develo
 
 - Python 3.10+ with [`requests`](https://pypi.org/project/requests/) and [`rich`](https://github.com/Textualize/rich)
 - A Genspark account (export browser cookies to `cookies.json`)
+- **Platforms:** Linux, macOS, and Windows — POSIX uses a persistent PTY bash; Windows uses a persistent cmd.exe backend with a native Python grep tool (no WSL required). See [SETUP.md](SETUP.md) for the platform matrix and a WSL alternative.
 
 ---
 

@@ -2,6 +2,8 @@
 
 **Apex** is a native, dedicated autonomous coding agent harness purpose-built for Genspark models. It connects directly to Genspark's streaming API and orchestrates local command execution, code editing, and environment management with a persistent PTY shell, atomic diffs, and context management.
 
+> **Platforms:** Linux, macOS, and Windows. First-time setup (dependencies, cookie export, per-platform notes): see **[SETUP.md](SETUP.md)**.
+
 ---
 
 ## 1. Quickstart

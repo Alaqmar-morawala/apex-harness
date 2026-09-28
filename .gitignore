@@ -9,12 +9,14 @@
 
 # Allow the Apex Harness tool itself
 !apex
+!apex.cmd
 !apex_harness.py
 
 # Allow project documentation
 !APEX_HARNESS.md
 !APEX_HARNESS_HANDOFF.md
 !API.md
+!SETUP.md
 
 # ── Never track under any circumstance (explicit, even if whitelist changes) ──
 cookies.json

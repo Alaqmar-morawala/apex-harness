@@ -218,6 +218,17 @@ An independent QA subagent ran an 11-scenario live-API acceptance suite (`/tmp/a
 
 ---
 
+## 4.2 Windows Support & Setup Guide (v1.2.0)
+
+1. **Import safety** — `pty`, `termios`, `fcntl`, `struct`, `select` are now imported inside a `if os.name == "posix":` guard (they don't exist on Windows and previously crashed at import). `readline` is a guarded optional import. The harness now imports cleanly on Windows.
+2. **Platform-adaptive shell** — `PersistentShell` is now an alias: `_PosixShell` (unchanged PTY implementation) on POSIX, `_WindowsShell` on Windows. The Windows backend runs a persistent `cmd.exe /Q /K /D` with piped stdio (pipes don't echo, so no ECHO workaround needed), a daemon reader thread feeding a `queue.Queue` (Windows pipes don't support `select`), a `%errorlevel%` sentinel for exit codes, `chcp 65001` UTF-8, timeout desync re-sync, and auto-restart if cmd dies. Constructor accepts `shell_cmd`/`ec_expr` overrides for testability.
+3. **Platform-aware model guidance** — `_system_prompt()` now uses `platform` instead of `os.uname()` (another latent Windows crash) and instructs the model to use Windows syntax (`dir`, `type`, `del`, `where`) on cmd.exe.
+4. **Native Python grep** — `grep` uses a pure-Python recursive regex search (`_grep_python`, include-glob filtering, 2MB file cap, 80-result cap) on Windows instead of shell `grep`.
+5. **UI/UX** — `/clear` runs `cls` on Windows; the banner shows the active shell backend; `apex.cmd` launcher auto-picks `py` or `python`.
+6. **Setup guide** — `SETUP.md` covers dependencies, cookie export (with the exact JSON shape), multi-account jars, the platform behavior matrix, optional env vars, a WSL2 alternative, and troubleshooting.
+
+---
+
 ## 5. Model Catalog Reference
 
 The default model is configured as **`opus-5.5`** in `apex_harness.py`:

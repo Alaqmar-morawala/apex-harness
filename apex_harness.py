@@ -8,7 +8,9 @@ atomic file editing with undo, smart context management, multi-account
 pooling with 429 failover, and dynamic model switching.
 
 Usage:
-    ./apex                              # interactive REPL
+    ./apex                              # interactive REPL (Linux/macOS)
+    apex.cmd                            # interactive REPL (Windows)
+    python apex_harness.py              # works everywhere
     ./apex -q "create a flask app"      # single query
     ./apex --model claude-sonnet-5      # pick model
     ./apex --cookies cookies.json       # explicit cookie file
@@ -18,16 +20,14 @@ from __future__ import annotations
 import argparse
 import atexit
 import difflib
-import fcntl
+import fnmatch
 import json
 import os
-import pty
+import platform
+import queue
 import re
-import readline
-import select
-import struct
+import subprocess
 import sys
-import termios
 import textwrap
 import threading
 import time
@@ -41,11 +41,24 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.theme import Theme
 
+try:
+    import readline  # POSIX line editing/history; absent on Windows
+except ImportError:
+    readline = None
+
+_POSIX = os.name == "posix"
+if _POSIX:
+    import fcntl
+    import pty
+    import select
+    import struct
+    import termios
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 DEFAULT_MODEL = "opus-5.5"
 MAX_STEPS_DEFAULT = 30
@@ -428,8 +441,8 @@ class GensparkClient:
 # § 3. EXECUTION ENGINE — Persistent PTY Shell, Atomic Editor, File Tools
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class PersistentShell:
-    """PTY-backed bash. cd, exports, source, and virtualenvs persist across calls."""
+class _PosixShell:
+    """POSIX backend: PTY-backed bash. cd, exports, source, and virtualenvs persist across calls."""
 
     def __init__(self):
         self._master: Optional[int] = None
@@ -583,6 +596,150 @@ class PersistentShell:
                 pass
 
 
+_WINDOWS_CMD_DEFAULT = ["cmd.exe", "/Q", "/K", "/D"]
+
+
+class _WindowsShell:
+    """Windows backend: persistent cmd.exe with piped stdio and a reader thread.
+
+    Pipes don't echo (no TTY), and a sentinel line captures %errorlevel%.
+    State (cd, set, setx-per-process env) persists across run() calls.
+    """
+
+    def __init__(self, shell_cmd: Optional[List[str]] = None, ec_expr: str = "%errorlevel%"):
+        self._shell_cmd = shell_cmd or _WINDOWS_CMD_DEFAULT
+        self._ec_expr = ec_expr
+        self._crlf = self._shell_cmd[0].lower().endswith("cmd.exe")
+        self._nl = "\r\n" if self._crlf else "\n"
+        self._proc = None
+        self._sentinel = f"__APEX_{uuid.uuid4().hex[:8]}__"
+        self._lock = threading.Lock()
+        self._desync = False
+        self._queue: "queue.Queue[str]" = queue.Queue()
+        self._start()
+
+    def _start(self):
+        spawn_kwargs: Dict[str, Any] = {}
+        if os.name == "nt":
+            spawn_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        self._proc = subprocess.Popen(
+            self._shell_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            **spawn_kwargs,
+        )
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader.start()
+        if self._shell_cmd[0].lower().endswith("cmd.exe"):
+            # UTF-8 codepage, and swallow the banner
+            self._proc.stdin.write("chcp 65001 > nul\r\n")
+            self._proc.stdin.flush()
+        time.sleep(0.3)
+        self._drain_startup()
+
+    def _read_loop(self):
+        assert self._proc and self._proc.stdout
+        for line in self._proc.stdout:
+            self._queue.put(line)
+        self._queue.put(None)  # EOF marker
+
+    def _drain_startup(self, timeout: float = 0.5):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            try:
+                item = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if item is None:
+                break
+
+    def run(self, command: str, timeout: int = SHELL_TIMEOUT) -> Tuple[str, int]:
+        with self._lock:
+            if self._proc is None or self._proc.poll() is not None:
+                self._start()
+            if self._desync:
+                # a previous command timed out; discard output until its sentinel appears
+                self._resync()
+            assert self._proc and self._proc.stdin
+            marker = f"{self._sentinel}:"
+            try:
+                self._proc.stdin.write(f"{command}{self._nl}")
+                self._proc.stdin.write(f"echo {marker}{self._ec_expr}{self._nl}")
+                self._proc.stdin.flush()
+            except OSError:
+                self._start()
+                assert self._proc and self._proc.stdin
+                self._proc.stdin.write(f"{command}{self._nl}")
+                self._proc.stdin.write(f"echo {marker}{self._ec_expr}{self._nl}")
+                self._proc.stdin.flush()
+
+            parts: List[str] = []
+            t0 = time.time()
+            exit_code = -1
+
+            while True:
+                left = timeout - (time.time() - t0)
+                if left <= 0:
+                    parts.append(f"\n[timed out after {timeout}s]")
+                    exit_code = 124
+                    self._desync = True
+                    break
+                try:
+                    item = self._queue.get(timeout=min(left, 0.15))
+                except queue.Empty:
+                    continue
+                if item is None:
+                    # shell process died
+                    self._start()
+                    return "[shell restarted: previous shell process terminated]", 1
+                s = item.rstrip("\r\n")
+                if s.startswith(marker):
+                    try:
+                        exit_code = int(s[len(marker):].strip())
+                    except ValueError:
+                        exit_code = 0
+                    break
+                parts.append(s)
+
+            return "\n".join(parts).strip(), exit_code
+
+    def _resync(self, timeout: float = 3.0):
+        t0 = time.time()
+        marker = f"{self._sentinel}:"
+        while time.time() - t0 < timeout:
+            try:
+                item = self._queue.get(timeout=0.2)
+            except queue.Empty:
+                self._desync = False
+                return
+            if item is None:
+                self._start()
+                self._desync = False
+                return
+            if item.rstrip("\r\n").startswith(marker):
+                self._desync = False
+                return
+
+    def close(self):
+        if self._proc is not None:
+            try:
+                self._proc.stdin.write(f"exit{self._nl}")
+                self._proc.stdin.flush()
+            except Exception:
+                pass
+            try:
+                self._proc.terminate()
+            except Exception:
+                pass
+
+
+PersistentShell = _PosixShell if _POSIX else _WindowsShell
+
+
 class FileSnapshot:
     """Automatic file snapshots for /undo."""
 
@@ -724,6 +881,8 @@ class ToolRegistry:
         return "\n".join(lines[:300]) or "[empty]"
 
     def grep(self, pattern: str, path: str = ".", include: str = "") -> str:
+        if not _POSIX:
+            return self._grep_python(pattern, path, include)
         inc = f"--include='{include}'" if include else ""
         cmd = (
             f"grep -rn --color=never {inc} -E '{pattern}' '{path}' "
@@ -733,6 +892,46 @@ class ToolRegistry:
         )
         out, _ = self.shell.run(cmd, timeout=15)
         return self._truncate(out) or "[no matches]"
+
+    def _grep_python(self, pattern: str, path: str = ".", include: str = "",
+                     max_results: int = 80) -> str:
+        """Pure-Python recursive regex search (Windows path — no shell grep)."""
+        try:
+            rx = re.compile(pattern)
+        except re.error as e:
+            return f"[error] invalid regex: {e}"
+        base = Path(path).expanduser()
+        if not base.exists():
+            return f"[error] Not found: {path}"
+        ignore_dirs = {".git", "node_modules", "__pycache__", ".venv", ".tox", ".idea", ".vscode"}
+        results: List[str] = []
+        files = [base] if base.is_file() else []
+        if not files:
+            for root, dirs, names in os.walk(base):
+                dirs[:] = [d for d in sorted(dirs) if d not in ignore_dirs]
+                for n in sorted(names):
+                    if include and not fnmatch.fnmatch(n, include):
+                        continue
+                    files.append(Path(root) / n)
+                    if len(results) >= max_results:
+                        break
+                if len(results) >= max_results:
+                    break
+        for f in files:
+            if len(results) >= max_results:
+                break
+            try:
+                if f.stat().st_size > 2_000_000:
+                    continue
+                text = f.read_text(errors="ignore")
+            except OSError:
+                continue
+            for i, ln in enumerate(text.splitlines(), 1):
+                if rx.search(ln):
+                    results.append(f"{f}:{i}: {ln.strip()[:300]}")
+                    if len(results) >= max_results:
+                        break
+        return "\n".join(results) or "[no matches]"
 
     def _truncate(self, text: str) -> str:
         if not text:
@@ -1057,9 +1256,18 @@ class ContextManager:
 
 def _system_prompt() -> str:
     cwd = os.getcwd()
-    uname = os.uname()
+    if _POSIX:
+        plat = f"{platform.system()} {platform.machine()}"
+        shell_line = "Shell: bash (persistent — cd, exports, source, venvs survive across tool calls)"
+    else:
+        plat = f"Windows {platform.release()} ({platform.machine()})"
+        shell_line = (
+            "Shell: cmd.exe (persistent — cd, set, and environment changes survive across tool calls). "
+            "Use Windows command syntax: dir, type, del, copy, where, python. "
+            "bash syntax (ls, cat, rm, grep) does NOT work — use the dedicated tools instead."
+        )
     return textwrap.dedent(f"""\
-    You are Apex, an autonomous coding agent executing directly on the user's Linux workstation.
+    You are Apex, an autonomous coding agent executing directly on the user's workstation.
     You have active local tool integration: bash, read_file, write_file, edit_file, list_dir, grep.
     Your tool calls run immediately in the local environment and return real outputs.
     Accomplish engineering and coding tasks autonomously using tools.
@@ -1067,8 +1275,8 @@ def _system_prompt() -> str:
 
     Environment:
     - Working directory: {cwd}
-    - Platform: {uname.sysname} {uname.machine}
-    - Shell: bash (persistent — cd, exports, source, venvs survive across tool calls)
+    - Platform: {plat}
+    - {shell_line}
     - Date: {time.strftime('%Y-%m-%d')}
 
     ## Tool Calling
@@ -1423,6 +1631,7 @@ def _ui_banner(pool: AccountPool, model: str, max_steps: int):
     n = len(pool.accounts)
     tags = ", ".join(a.tag for a in pool.accounts)
     tier = MODEL_CATALOG.get(model, {}).get("tier", "?")
+    shell_desc = "persistent PTY bash" if _POSIX else "persistent cmd.exe"
     print(f"""
 {C.BOLD}{C.CYAN}╔══════════════════════════════════════════════════════════╗
 ║                    ⚡ APEX HARNESS ⚡                    ║
@@ -1430,7 +1639,7 @@ def _ui_banner(pool: AccountPool, model: str, max_steps: int):
   {C.DIM}v{VERSION} — Autonomous Coding Agent for Genspark Models{C.RESET}
   {C.GREEN}Model:{C.RESET}    {model}  ({tier})
   {C.GREEN}Accounts:{C.RESET} {n} loaded  [{tags}]
-  {C.GREEN}Shell:{C.RESET}    persistent PTY  |  {C.GREEN}Tools:{C.RESET} bash, read, write, edit, list, grep
+  {C.GREEN}Shell:{C.RESET}    {shell_desc}  |  {C.GREEN}Tools:{C.RESET} bash, read, write, edit, list, grep
   {C.GREEN}Steps:{C.RESET}    {max_steps} max  |  {C.GREEN}Mode:{C.RESET} auto-execute
 
   {C.DIM}Type a task, or /help for commands. Ctrl+C to interrupt.{C.RESET}
@@ -1458,14 +1667,15 @@ class ApexCLI:
         )
         self.query = args.query
 
-        # readline
-        HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            readline.read_history_file(str(HISTORY_FILE))
-        except FileNotFoundError:
-            pass
-        readline.set_history_length(2000)
-        atexit.register(readline.write_history_file, str(HISTORY_FILE))
+        # readline history (POSIX; Windows console host provides basic line editing)
+        if readline is not None:
+            HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                readline.read_history_file(str(HISTORY_FILE))
+            except FileNotFoundError:
+                pass
+            readline.set_history_length(2000)
+            atexit.register(readline.write_history_file, str(HISTORY_FILE))
         atexit.register(self.shell.close)
 
     def run(self):
@@ -1568,7 +1778,7 @@ class ApexCLI:
             print(C.s("  Reset.", C.GREEN))
 
         elif cmd == "/clear":
-            os.system("clear")
+            os.system("cls" if os.name == "nt" else "clear")
 
         elif cmd == "/undo":
             if self.snaps.has_entries:
