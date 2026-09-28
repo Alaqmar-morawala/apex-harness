@@ -251,6 +251,14 @@ An independent code review found 7 defects; all were fixed and then re-verified 
 
 Also added: per-step token usage line (`[tokens: prompt … · completion … · total … | served: …]`) from `session_state._llm_usage`, and cookie-expiry warnings at startup (expired `session_id` disables the account; <7 days warns).
 
+## 4.3.1 MoA Payload Truth + Subagents (v1.7.6 → v1.8.0)
+
+- **MoA billing fix (user-reported)**: selecting gpt-moa still billed opus — the harness sent only `moa_models`+`use_moa_proxy` while leaving `ai_chat_model` at the base model. The web UI's payload builder (extracted from the JS bundle) shows MoA mode ALSO sends the ensemble in a `models` field with `ai_chat_model` set to the ensemble LEAD. `stream()` now does exactly that; selecting any MoA sets the primary/billed model to the lead and `/moa off` restores the previous single model.
+- **MoA presets**: `genspark-moa` (3 models) and `gpt-moa` = gpt-5.5-pro + gpt-5.4-pro + gpt-5.6-sol + **gpt-6-sol** (4-model ensemble works; gpt-6-sol/gpt-6-luna discovered in the live page payload and server-verified). Custom ensembles via `/moa id1 id2 ...`, `/moa off`. Substitution guard is skipped in MoA mode (ai_chat_model mismatch is expected there).
+- **What "served model" means in MoA**: the stream contains exactly ONE `message_result` per turn — `_llm_model` names only the LEAD/synthesizer (or is absent). Ensemble members run server-side and are invisible to the client; they surface only on the billing/usage page. Verified by raw SSE capture.
+- **Subagents (v1.8.0)**: `<tool name="subagent" prompt="..." model="..." max_steps="12">` spawns a fresh, isolated Apex instance — own Genspark thread, own PTY shell, own undo stack, same skills. It cannot see the parent conversation (prompts must be self-contained), cannot spawn further subagents (depth 1), and returns its final report as the tool result. UI: `╔═ 🤖 SUBAGENT` header/footer banners; sub-steps render inline.
+- **Soft usage-limit failover**: Genspark returns per-account caps ("AI Chat [5-hour limit]") as normal 200 text. `stream()` detects this, marks the account cooldown, and fails over — instead of relaying the notice as an answer.
+
 ## 4.4 Internet-Sourced Skill Library (v1.5.0)
 
 The bundled packs were upgraded from hand-rolled to **adaptations of the most-recommended open agent skills**, researched from the 2026 ecosystem (consensus sources: [obra/superpowers](https://github.com/obra/superpowers) — MIT, the most-praised methodology collection; [VoltAgent/awesome-agent-skills](https://github.com/VoltAgent/awesome-agent-skills) aggregate; Anthropic's official skills).

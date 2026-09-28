@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.7.6"
+VERSION = "1.8.0"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -74,6 +74,7 @@ READ_WINDOW = 250
 CONTEXT_BUDGET = 22_000
 HISTORY_FILE = Path.home() / ".apex" / "history"
 UNDO_STACK_LIMIT = 50
+SUBAGENT_MAX_STEPS = 12
 MAX_RENDER_CHARS = 20_000
 
 
@@ -237,6 +238,7 @@ class ThreadResetByFailover(RuntimeError):
 
 class GensparkClient:
     def __init__(self, cookie_spec: Optional[str] = None):
+        self.cookie_spec = cookie_spec
         self.pool = AccountPool()
         self._load_pool(cookie_spec)
         self.project_id: Optional[str] = None
@@ -480,6 +482,21 @@ class GensparkClient:
                           and j.get("field_value") == "FINISHED"):
                         finished = True
                         break
+
+                # Genspark sometimes returns per-account usage caps as a
+                # normal 200 message (e.g. "AI Chat [5-hour limit]"). Treat
+                # that as a soft rate limit so the pool fails over instead of
+                # relaying the notice as if it were an answer.
+                if "5-hour limit" in text or "hour limit" in text.lower():
+                    acc.mark_429()
+                    last_err = requests.HTTPError("account usage window exhausted", response=r)
+                    print(C.s(
+                        f"  [pool] {acc.tag} usage window exhausted → failover "
+                        f"({attempt+1}/{max_tries})", C.YELLOW
+                    ))
+                    if attempt + 1 < max_tries:
+                        continue
+                    raise last_err
 
                 acc.mark_ok()
                 self.project_owner = acc
@@ -1237,7 +1254,7 @@ class ToolCall:
 
 
 class ToolParser:
-    NAMES = {"bash", "read_file", "write_file", "edit_file", "list_dir", "grep", "skill"}
+    NAMES = {"bash", "read_file", "write_file", "edit_file", "list_dir", "grep", "skill", "subagent"}
     # Only tags with a valid header open a tool call — bare "<tool" mentions in
     # prose must never affect nesting (external-review finding #5)
     OPEN_RE = re.compile(r'<tool\s+name=["\'](\w+)["\']([^>]*)>')
@@ -1525,6 +1542,14 @@ class ToolParser:
             }
         elif name == "skill":
             return {"name": attrs.get("name") or attrs.get("skill") or body}
+        elif name == "subagent":
+            a2: Dict[str, Any] = {"prompt": attrs.get("prompt") or attrs.get("task") or body}
+            if attrs.get("model"):
+                a2["model"] = attrs["model"]
+            ms = cls._safe_int(attrs.get("max_steps") or attrs.get("steps"))
+            if ms:
+                a2["max_steps"] = ms
+            return a2
         # Unknown tool names become calls too, so the task CONTINUES with a
         # self-correcting error instead of ending as if it finished (#8)
         return {"tool": name, "body": body}
@@ -1682,6 +1707,17 @@ def _system_prompt(skills: Optional[SkillStore] = None) -> str:
     <tool name="grep" pattern="TODO|FIXME" path="src/" include="*.py">
     </tool>
 
+    ### subagent — Delegate a focused sub-task to a fresh Apex instance
+    <tool name="subagent" prompt="Self-contained task for the sub-agent" max_steps="12">
+    </tool>
+    Optional: model="any-catalog-id" (default: your own model).
+    The subagent is a SEPARATE agent: it CANNOT see this conversation. Its prompt must be
+    fully self-contained (paths, context, exact expectations). It has its own shell and
+    tools, does the work, and its FINAL REPORT comes back as this tool's result.
+    Use subagents for: independent research/surveys, focused sub-builds, anything whose
+    working detail you don't need cluttering your own context. ONE subagent per response.
+    Subagents cannot spawn further subagents.
+
     ## Rules
     1. ONE tool call per response. Wait for the result before calling the next.
     2. ALWAYS read a file before editing — never guess at content.
@@ -1722,6 +1758,7 @@ class AgentEngine:
         max_steps: int = MAX_STEPS_DEFAULT,
         search: bool = False,
         skills: Optional[SkillStore] = None,
+        allow_subagent: bool = True,
     ):
         self.client = client
         self.tools = tools
@@ -1731,6 +1768,7 @@ class AgentEngine:
         self.search = search
         self.moa: Optional[List[str]] = None
         self.skills = skills
+        self.allow_subagent = allow_subagent
         self.pending_skills: List[Tuple[str, str]] = []
         self._warned_pairs: Set[Tuple[str, str]] = set()
         self._unfinished_retry = False
@@ -1916,6 +1954,36 @@ class AgentEngine:
 
         return final
 
+    def _run_subagent(self, prompt: str, model: str, steps: int) -> str:
+        """Spawn a fresh, isolated Apex instance for a focused sub-task.
+
+        Isolation: its own Genspark thread, its own PTY shell, its own undo
+        stack. It cannot see this conversation, cannot spawn further
+        subagents, and returns only its final report."""
+        _ui_subagent_start(prompt, model, steps)
+        sub_client = GensparkClient(getattr(self.client, "cookie_spec", None))
+        sub_shell = PersistentShell()
+        sub_tools = ToolRegistry(sub_shell, FileSnapshot(), skills=self.tools.skills)
+        sub_engine = AgentEngine(
+            client=sub_client,
+            tools=sub_tools,
+            context=ContextManager(),
+            model=model,
+            max_steps=steps,
+            search=self.search,
+            skills=self.skills,
+            allow_subagent=False,
+        )
+        try:
+            result = sub_engine.run(prompt)
+        finally:
+            sub_shell.close()
+        if not result or not result.strip():
+            result = ("[subagent returned no final report — it hit its step limit "
+                      f"({steps}) or was interrupted. Re-run with a narrower task.]")
+        _ui_subagent_end(result)
+        return result
+
     def _exec(self, tc: ToolCall) -> str:
         a = tc.args
         try:
@@ -1958,6 +2026,16 @@ class AgentEngine:
                 )
             elif tc.name == "skill":
                 return self.tools.skill(name=a.get("name", ""))
+            elif tc.name == "subagent":
+                if not self.allow_subagent:
+                    return ("[error] subagents cannot spawn further subagents. "
+                            "Complete the task yourself and report back.")
+                prompt = (a.get("prompt") or "").strip()
+                if not prompt:
+                    return "[error] subagent requires a 'prompt' attribute describing the self-contained task."
+                model = a.get("model") or self.model
+                steps = a.get("max_steps") or SUBAGENT_MAX_STEPS
+                return self._run_subagent(prompt, model, int(steps))
             else:
                 return (f"[error] unknown tool '{tc.name}'. Available tools: "
                         f"{', '.join(sorted(ToolParser.NAMES))}. Re-issue your action with one of these.")
@@ -2049,6 +2127,7 @@ def _ui_tool_start(tc: ToolCall):
     icons = {
         "bash": "⌘", "read_file": "📄", "write_file": "✏️",
         "edit_file": "🔧", "list_dir": "📂", "grep": "🔍", "skill": "🧠",
+        "subagent": "🤖",
     }
     icon = icons.get(tc.name, "🔨")
     detail = ""
@@ -2062,6 +2141,9 @@ def _ui_tool_start(tc: ToolCall):
         detail = f"{d} (depth {tc.args.get('depth', 3)})" if d else ""
     elif tc.name == "grep":
         detail = f"/{tc.args.get('pattern', '')}/ in {tc.args.get('path', '.')}"
+    elif tc.name == "subagent":
+        pr = tc.args.get("prompt", "")
+        detail = pr[:100] + ("…" if len(pr) > 100 else "")
 
     print(f"\n  {C.BOLD}{C.GREEN}┌─ {icon} {tc.name}{C.RESET}  {C.DIM}{detail}{C.RESET}")
 
@@ -2089,6 +2171,16 @@ def _ui_tool_output(output: str, tool: str = ""):
         for ln in lines:
             print(f"  {C.GREEN}│{C.RESET} {C.DIM}{ln}{C.RESET}")
     print(f"  {C.BOLD}{C.GREEN}└─{C.RESET}")
+
+
+def _ui_subagent_start(prompt: str, model: str, steps: int):
+    print(f"\n  {C.BOLD}{C.MAGENTA}╔═ 🤖 SUBAGENT ═ {model} · max {steps} steps{C.RESET}")
+    print(f"  {C.MAGENTA}║{C.RESET} {C.DIM}task: {prompt[:160]}{'…' if len(prompt) > 160 else ''}{C.RESET}")
+
+
+def _ui_subagent_end(result: str):
+    n = len(result or "")
+    print(f"  {C.BOLD}{C.MAGENTA}╚═ 🤖 SUBAGENT done — {n} chars returned to the parent{C.RESET}")
 
 
 def _ui_banner(pool: AccountPool, model: str, max_steps: int):
