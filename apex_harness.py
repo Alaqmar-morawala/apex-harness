@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.7.3"
+VERSION = "1.7.4"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -131,6 +131,19 @@ MODEL_CATALOG: Dict[str, Dict[str, str]] = {
 }
 
 MOA_DEFAULT = ["gpt-5.1-low", "claude-sonnet-4-6", "gemini-3.1-pro-preview"]
+# All-best-GPT ensemble — every id server-verified 2026-09-29 (gpt-5.5-pro and
+# gpt-5.5 serve as dated variants; prefix match counts as honored). Two 30x-tier
+# members: expect ~4x credit burn per step.
+MOA_GPT = ["gpt-5.5-pro", "gpt-5.4-pro", "gpt-5.6-sol", "gpt-5.5"]
+MOA_PRESETS = {
+    "genspark-moa": MOA_DEFAULT,
+    "gpt-moa": MOA_GPT,
+}
+MOA_ALIASES = {
+    "mixture-of-agents": "genspark-moa",
+    "genspark-gpt-moa": "gpt-moa",
+    "gpt-mixture": "gpt-moa",
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2107,8 +2120,9 @@ class ApexCLI:
             search=args.search,
             skills=self.skills,
         )
-        if args.model in ("genspark-moa", "mixture-of-agents"):
-            self.engine.moa = MOA_DEFAULT
+        _moa_key = MOA_ALIASES.get(args.model, args.model)
+        if _moa_key in MOA_PRESETS:
+            self.engine.moa = list(MOA_PRESETS[_moa_key])
             self.engine.model = DEFAULT_MODEL
         self.query = args.query
 
@@ -2169,6 +2183,7 @@ class ApexCLI:
   {C.CYAN}/reset{C.RESET}            Clear conversation
   {C.CYAN}/clear{C.RESET}            Clear screen
   {C.CYAN}/steps [n]{C.RESET}        View/set max steps
+  {C.CYAN}/moa <ids|off>{C.RESET}     Custom MoA ensemble (or disable)
   {C.CYAN}/skills{C.RESET}            List installed skill packs
   {C.CYAN}/skill <name>{C.RESET}      Queue a skill for the next task
   {C.CYAN}/history{C.RESET}          Context usage stats
@@ -2178,11 +2193,17 @@ class ApexCLI:
 
         elif cmd == "/model":
             if arg:
-                if arg == "genspark-moa" or arg == "mixture-of-agents":
+                key = MOA_ALIASES.get(arg, arg)
+                if key in MOA_PRESETS:
+                    ensemble = MOA_PRESETS[key]
                     old = self.engine.model + (" + MoA" if self.engine.moa else "")
-                    self.engine.moa = MOA_DEFAULT
-                    print(C.s(f"  {old} → Mixture-of-Agents ({' + '.join(MOA_DEFAULT)})", C.GREEN))
-                    print(C.s("  [MoA runs all three models per step — ~3x credit burn]", C.YELLOW))
+                    self.engine.moa = list(ensemble)
+                    if key == "gpt-moa":
+                        print(C.s(f"  {old} → GPT Mixture-of-Agents ({' + '.join(ensemble)})", C.GREEN))
+                        print(C.s("  [two 30x-tier members — expect ~4x credit burn per step]", C.YELLOW))
+                    else:
+                        print(C.s(f"  {old} → Mixture-of-Agents ({' + '.join(ensemble)})", C.GREEN))
+                        print(C.s("  [MoA runs all three models per step — ~3x credit burn]", C.YELLOW))
                 elif arg in MODEL_CATALOG:
                     old = self.engine.model + (" + MoA" if self.engine.moa else "")
                     self.engine.model = arg
@@ -2201,9 +2222,33 @@ class ApexCLI:
                 for mid, info in MODEL_CATALOG.items():
                     mark = " ◀" if (mid == cur and not moa_on) else ""
                     print(f"    {C.CYAN}{mid:40s}{C.RESET} {info['tier']:>5s}  {C.DIM}{info['cls']}{C.RESET}{C.GREEN}{mark}{C.RESET}")
-                moa_mark = C.s(" ◀", C.GREEN) if moa_on else ""
-                print(f"    {C.CYAN}{'genspark-moa':40s}{C.RESET} {'MoA':>5s}  {C.DIM}ensemble: {' + '.join(MOA_DEFAULT)}{C.RESET}{C.GREEN}{moa_mark}{C.RESET}")
+                for key, ensemble in MOA_PRESETS.items():
+                    moa_mark = C.s(" ◀", C.GREEN) if (moa_on and self.engine.moa == list(ensemble)) else ""
+                    print(f"    {C.CYAN}{key:40s}{C.RESET} {'MoA':>5s}  {C.DIM}ensemble: {' + '.join(ensemble)}{C.RESET}{C.GREEN}{moa_mark}{C.RESET}")
                 print()
+
+        elif cmd == "/moa":
+            # custom ensemble: /moa model1 model2 [model3 ...] | /moa off
+            if not arg:
+                if self.engine.moa:
+                    print(f"  MoA ensemble: {', '.join(self.engine.moa)}  (/moa off to disable)")
+                else:
+                    print("  Usage: /moa <model1> <model2> [model3 ...]   |   /moa off")
+                    print(f"  Presets: /model genspark-moa · /model gpt-moa")
+            elif arg.strip().lower() == "off":
+                self.engine.moa = None
+                print(C.s("  MoA disabled — single-model mode.", C.GREEN))
+            else:
+                ids = arg.split()
+                unknown = [i for i in ids if i not in MODEL_CATALOG]
+                if unknown:
+                    print(C.s(f"  Unknown model(s): {', '.join(unknown)} — see /model", C.RED))
+                elif len(ids) < 2:
+                    print(C.s("  MoA needs at least 2 models.", C.RED))
+                else:
+                    self.engine.moa = ids
+                    print(C.s(f"  Custom MoA ensemble: {' + '.join(ids)}", C.GREEN))
+                    print(C.s(f"  [~{len(ids)}x credit burn per step — every model runs on every step]", C.YELLOW))
 
         elif cmd == "/search":
             if arg.lower() in ("on", "true", "1"):
