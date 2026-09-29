@@ -1,22 +1,32 @@
-# APEX HARNESS — COMPREHENSIVE AGENT HANDOFF DOCUMENT
-**Date:** 2026-09-28  
-**Project Location:** `/home/alaqmar/test`  
-**Primary Executables:** `/home/alaqmar/test/apex` (Bash wrapper) & `/home/alaqmar/test/apex_harness.py` (Core Python runtime)  
-**Primary Target Workspaces:** `/home/alaqmar/test` and `/home/alaqmar/Desktop/Auto Bug Bounty`  
+# APEX HARNESS — COMPREHENSIVE ENGINEERING HANDOFF & ARCHITECTURE MANUAL
+**Version:** 1.9.2  
+**Date:** 2026-09-29  
+**GitHub Repository:** [https://github.com/Alaqmar-morawala/apex-harness](https://github.com/Alaqmar-morawala/apex-harness) (Public, Branch `main`)  
+**Host Environment:** Linux 7.1.5+kali-amd64 x64 (`Alaqmars-WorkStation`)  
+**Primary Executable:** `apex` (globally symlinked to `~/.local/bin/apex`), backed by `/home/alaqmar/test/apex_harness.py`  
+**Primary Workspaces:** `/home/alaqmar/test` and `/home/alaqmar/Desktop/Auto Bug Bounty`  
 
 ---
 
-## 1. Executive Summary & Purpose
+## 1. Executive Summary & Genesis
 
-### The Backstory: Why This Exists
-The user previously attempted to use Genspark AI Chat models through Claude Code CLI using a custom translation proxy (`genspark_provider.py`, ~2,400 LOC). That project was declared a **failure** because adapting Genspark's text/SSE API into Claude Code's strict Anthropic Messages format caused cascading structural failures:
-- Anthropic schema validation errors on tool calls
-- Severe token budget blowouts from prompt re-assembly
-- Subagent stall loops and "acknowledged" dead turns
-- Fragile JSON parsing and truncated tool block salvaging
+### Why Apex Exists (The Failure of Translation Shims)
+Prior to Apex, the project attempted to bridge Genspark AI Chat models into Claude Code CLI using a custom Python translation proxy (`genspark_provider.py`, ~2,400 LOC) listening on `http://localhost:8788`. That approach failed structurally:
+1. **Schema Validation Collapses**: Claude Code expects strict Anthropic tool-use schema blocks (`tool_use` with valid JSON `input`). Genspark is a raw streaming text model. Attempting to parse, repair, and translate streaming text into Anthropic JSON blocks produced recurring validation errors.
+2. **Token Blowouts**: Re-assembling conversation history and feeding cumulative prompt transcripts into Claude Code caused catastrophic token explosions.
+3. **Subagent Stall Loops**: Claude Code subagents repeatedly stalled on greeting turns or generic acknowledgments ("Understood, I will now...").
+4. **Fragile JSON Salvaging**: When models emitted slightly malformed tool calls, regex salvaging continually drifted and broke.
 
-### The Solution: Apex Harness
-Instead of forcing Genspark through an external intermediary harness, **Apex Harness** is a dedicated, native autonomous coding agent runtime designed specifically for Genspark's reverse-engineered API. It directly manages the ReAct agent loop, connects straight to the upstream SSE endpoint, and runs tools locally with real-time execution authority.
+### The Apex Solution: Native ReAct Agent Architecture
+**Apex Harness** completely eliminates intermediary translation proxies. It connects directly to Genspark's reverse-engineered Server-Sent Events (SSE) endpoint (`POST https://www.genspark.ai/api/agent/ask_proxy`) and runs a native, local ReAct (Reasoning + Acting) loop directly on the developer's workstation. 
+
+Apex owns:
+- The streaming client connection and account pool.
+- The stateful persistent PTY shell (Linux/macOS) and cmd.exe process (Windows).
+- The atomic file tools with automatic undo snapshots.
+- Context budgeting and active compaction.
+- The single-pass compiled Markdown terminal user interface.
+- Agentic subagent delegation and modular skill execution.
 
 ---
 
@@ -24,24 +34,32 @@ Instead of forcing Genspark through an external intermediary harness, **Apex Har
 
 ```
 /home/alaqmar/test/
-├── apex                                # Executable wrapper launcher (chmod +x)
-├── apex_harness.py                     # The complete single-file Apex harness (~1,280 lines)
-├── APEX_HARNESS.md                     # End-user documentation and command reference
-├── APEX_HARNESS_HANDOFF.md             # THIS FILE: Comprehensive engineering handoff
+├── apex                                # Executable Bash wrapper launcher (readlink-aware, chmod +x)
+├── apex.cmd                            # Windows batch launcher (auto-picks py or python)
+├── apex_harness.py                     # Single-file core Apex runtime (~2,000 LOC, v1.9.2)
+├── APEX_HARNESS.md                     # User documentation and CLI reference manual
+├── APEX_HARNESS_HANDOFF.md             # THIS FILE: Definitive engineering handoff and technical manual
 ├── API.md                              # Reverse-engineered Genspark API reference & protocol spec
-├── cookies.json                        # ACTIVE Genspark credentials (session_id, c1, c2, etc.)
-├── cookies_2.json.bak                  # Backup of older expired cookie set
-├── cookies_3.json.bak                  # Backup of older expired cookie set
-├── GEMINI.md                           # User AI persona, system directives & communication style
-├── genspark_provider.py                # Legacy dual OpenAI/Anthropic provider (archival/reference)
-├── genspark_research.py                # Standalone headless research script (archival/reference)
-├── model_mapping.json                  # Model catalog mapping (Genspark internal names to IDs)
-├── queries.txt                         # Sample queries used for benchmarking
-├── research_out.jsonl                  # Output logs from research tests
-├── sniffer.mjs                         # Playwright script used to intercept Genspark web requests
-├── start-provider.sh                   # Startup script for legacy provider
-├── .env.example                        # Environment variable template
-└── .zcode/plans/                       # Historical planning documents
+├── SETUP.md                            # Comprehensive setup guide (Linux, macOS, Windows, WSL2)
+├── README.md                           # Public repository landing page
+├── .gitignore                          # Whitelist gitignore (strictly prevents credential & log leaks)
+├── cookies.json                        # Account 1: earnybuddy@gmail.com (Plus Plan)
+├── cookies_2.json                      # Account 2: alaqmarabbas7@gmail.com (Plus Plan)
+├── cookies_3.json                      # Account 3: alaqmar04@gmail.com (Plus Plan)
+├── skills/                             # Bundled modular skill packs (Agentic Skills Library)
+│   ├── test-driven-development.md      # TDD Iron Law: red-green-refactor cycle
+│   ├── systematic-debugging.md         # 4-phase root-cause debugging methodology
+│   ├── verification-before-completion.md # Evidence-before-claims gate function
+│   ├── writing-plans.md                # Actionable, verifiable implementation plans
+│   ├── brainstorming.md                # Design-before-code for ambiguous/large tasks
+│   ├── git-workflow.md                 # Atomic conventional commits & branch hygiene
+│   ├── code-review.md                  # Defect-first code review checklist (P0-P3)
+│   ├── python-testing.md               # Targeted pytest patterns & regression rules
+│   ├── security-recon.md               # Authorized testing only, scope-gate first
+│   └── writing-docs.md                 # Anti-doc-sprawl and single-purpose documentation
+├── ~/.local/bin/apex                   # Global symlink pointing to /home/alaqmar/test/apex
+├── ~/.apex/history                     # Persistent REPL readline command history
+└── ~/.apex/session.json                # Persisted thread handle for lossless /resume
 ```
 
 ---
@@ -58,7 +76,8 @@ Instead of forcing Genspark through an external intermediary harness, **Apex Har
                              │       ApexCLI & AgentEngine       │
                              │  - Multi-Turn Project Threading   │
                              │  - Single-Line Spinner (Rich)     │
-                             │  - Full Markdown Compiler (Rich)  │
+                             │  - Single-Pass Markdown Compiler  │
+                             │  - Character-Break Auto-Recovery  │
                              └──────┬─────────────────────┬──────┘
                                     │                     │
                      Step 1: System │                     │ Step 2+: Tool Results
@@ -67,16 +86,18 @@ Instead of forcing Genspark through an external intermediary harness, **Apex Har
                        ┌────────────────────────┐  ┌─────────────────────────┐
                        │    GensparkClient      │  │    Execution Engine     │
                        │ - POST ask_proxy (SSE) │  │ - Persistent PTY bash   │
-                       │ - AccountPool (429 cd) │  │ - termios.ECHO disabled │
-                       │ - Auto 401/403 disable │  │ - Python os.walk list   │
-                       │ - Thread recovery      │  │ - FileSnapshot (/undo)  │
+                       │ - AccountPool (3 Accts)│  │   (Windows: cmd.exe)    │
+                       │ - 30-min Usage Cooldown│  │ - Pure Python grep      │
+                       │ - Thread-Account Pin   │  │ - Atomic os.replace     │
+                       │ - Stream Finished Flag │  │ - FileSnapshot (/undo)  │
                        └────────────────────────┘  └─────────────────────────┘
 ```
 
 ### § 3.1. GensparkClient & Multi-Account Pool
 - **Endpoint**: `POST https://www.genspark.ai/api/agent/ask_proxy`
-- **Authentication**: Cookie jar loaded from `cookies.json` or `GENSPARK_COOKIES_JSON`. The critical cookies are `session_id`, `c1`, and `c2`.
-- **Required Headers** (bypasses Cloudflare without extra tokens):
+- **Protocol**: Server-Sent Events (SSE). Streams JSON objects prepended with `data: `.
+- **Authentication**: Cookie jar loaded from `cookies.json`, `cookies_2.json`, `cookies_3.json`, or environment variable `GENSPARK_COOKIES_JSON`.
+- **Required Headers** (Mandatory for Cloudflare bypass without captcha tokens):
   ```python
   {
       "Content-Type": "application/json",
@@ -87,261 +108,361 @@ Instead of forcing Genspark through an external intermediary harness, **Apex Har
       "Accept": "text/event-stream"
   }
   ```
-- **Payload Schema**:
+- **SSE Stream Lifecycle**:
+  - `project_start`: Delivers `id` (`project_id`) representing the server-side conversation thread.
+  - `message_field_delta`: Carries streaming token chunks in `delta`.
+  - `message_result`: Contains authoritative final message content and `message.session_state._llm_model` (the actual served model) and `_llm_usage`.
+  - `project_field` (`status=FINISHED`): Officially marks the end of the server stream.
+
+### § 3.2. Multi-Turn Threading Protocol (CRITICAL RULE)
+1. **Turn 1 (New Task)**:
+   - Request passes `project_id = None` and `last_seen_event_index = -1`.
+   - Query payload contains `_system_prompt(skills) + "\n\nUser: " + user_input`.
+   - Genspark initializes the thread, binds it to the authenticated account (`project_owner`), and returns `project_id`.
+2. **Turn 2+ (Subsequent Tool Invocations)**:
+   - Request passes the active `project_id` and updated `last_seen_event_index`.
+   - Query payload contains **ONLY** the new tool output:
+     ```text
+     Tool Result [{tool_name}]:
+     {output}
+     ```
+   - **DO NOT RESEND CUMULATIVE TRANSCRIPTS**: Genspark maintains conversation state server-side. Resending cumulative history triggers safety refusals (*"I don't have tools, this was simulated"*) or causes empty stream termination.
+3. **Thread-Account Pinning (`project_owner`)**:
+   - A thread created on Account A **cannot** be continued by Account B. Cross-account continuation results in empty responses or 403 errors.
+   - If Account A hits a rate limit or usage window mid-task, `GensparkClient` raises `ThreadResetByFailover`.
+   - The engine catches this, resets the server thread (`project_id = None`), and immediately re-anchors the task onto Account B by sending the full compacted local context.
+
+### § 3.3. Persistent Execution Engine
+- **POSIX Backend (`_PosixShell`)**:
+  - Spawns bash using `pty.openpty()` + `os.fork()`.
+  - Terminal echo is disabled (`termios.ECHO` stripped) so sent commands never pollute stdout.
+  - History expansion is disabled (`set +H`) so exclamation marks (`!`) do not corrupt command execution or exit codes.
+  - Synchronized via sentinel exit-code marker: `command\n__apex_ec=$?\necho "__APEX_<uuid>__:$__apex_ec@CWD@$PWD"\n`.
+  - Auto-restarts child bash if killed by an `exit` command.
+  - Resolves timeouts cleanly: sends `\x03` (Ctrl+C) to PTY and re-sends the sentinel line. Interruptible commands stay alive and maintain `cd`/env state; unkillable commands cleanly restart the shell.
+- **Windows Backend (`_WindowsShell`)**:
+  - Spawns `cmd.exe /Q /K /D` with piped stdio and UTF-8 codepage (`chcp 65001`).
+  - Reads output via daemon thread pushing lines to a thread-safe `queue.Queue`.
+  - Sentinel tracks exit codes and current directory: `echo __APEX_<uuid>__:%errorlevel%@CWD@%CD%`.
+- **Tool Suite**:
+  - `bash`: Stateful command execution.
+  - `read_file`: Line-numbered output with default 250-line paging (`READ_WINDOW = 250`). Emits explicit continuation hints (`offset=251 limit=250`) to prevent context blowouts.
+  - `write_file`: Atomic writes via `.apex-<uuid>.tmp` + `os.replace`. Preserves existing CRLF line endings. Automatic file snapshotting.
+  - `edit_file`: Strict single-match string replacement (`old_string` -> `new_string`). Unified diff output capped to avoid context explosion. Automatic file snapshotting. Refuses edits missing `---` separator or containing empty `old_string`.
+  - `list_dir`: Native Python `os.walk` traversal (no shell pipes, no broken pipe errors). Filtered against `.git`, `node_modules`, `__pycache__`, `.venv`.
+  - `grep`: Pure Python recursive regex search across all platforms (completely injection-proof; handles quotes, apostrophes, and spaces without shell involvement).
+  - `skill`: Progressive disclosure loader for modular markdown skill packs.
+  - `subagent`: Spawns isolated, independent child Apex instances.
+
+---
+
+## 4. Model Truth & Catalog
+
+### How Model Truth Was Discovered
+In earlier versions, the harness accepted model ID strings like `opus-5.5` or `claude-opus-5.5`. While Genspark returned HTTP 200, credit usage statements revealed that requests were secretly billed and executed on **Claude Sonnet 4.5**.
+
+Deep inspection of raw SSE packets revealed that Genspark provides the **true server-served model** inside:
+```
+message_result -> message -> session_state -> _llm_model
+```
+By analyzing the hydration payload of `https://www.genspark.ai/agents?type=ai_chat`, the authoritative model ID strings were extracted:
+
+| Web UI Name | True Genspark API ID | Serving Variant / Server Reported | Notes |
+|---|---|---|---|
+| **Claude Opus 5.5** | `claude-opus-5-5` | `claude-opus-5-5` | **Current Apex Default**. Hyphen ID (`-5-5`), not dot! |
+| **Claude Opus 5** | `claude-opus-5` | `claude-opus-5` | Verified honored. |
+| **Claude Opus 4.8** | `claude-opus-4-8` | `claude-opus-4-8-extended-cache` | Verified honored as extended cache variant. |
+| **Claude Opus 4.7** | `claude-opus-4-7` | `claude-opus-4-7-extended-cache` | Verified honored as extended cache variant. |
+| **Claude Sonnet 5** | `claude-sonnet-5` | `claude-sonnet-5` | Fast coding flagship. |
+| **Claude Sonnet 4.6** | `claude-sonnet-4-6` | `claude-sonnet-4-6` | Reliable workhorse. |
+| **Claude Haiku 4.5** | `claude-4-5-haiku` | `claude-4-5-haiku` | Fast, lightweight 1x tier. |
+| **GPT-6 Sol** | `gpt-6-sol` | `gpt-6-sol` | Brand new flagship line (images + files supported). |
+| **GPT-6 Luna** | `gpt-6-luna` | `gpt-6-luna` | Brand new fast tier (0.2x cost). |
+| **GPT-5.6 Sol** | `gpt-5.6-sol` | `gpt-5.6-sol` | Flagship coding model. |
+| **GPT-5.5 Pro** | `gpt-5.5-pro` | `gpt-5.5-pro-2026-04-23` | Deep reasoning 30x tier. |
+| **GPT-5.4 Pro** | `gpt-5.4-pro` | `gpt-5.4-pro` | Deep reasoning 30x tier. |
+| **GPT-5.5** | `gpt-5.5` | `gpt-5.5-2026-04-23` | Coding 5x tier. |
+| **Gemini 3.8 Flash** | `gemini-3.8-flash` | `gemini-3.8-flash` | Ultra-fast generalist. |
+| **Gemini 3.1 Pro** | `gemini-3.1-pro-preview` | `gemini-3.1-pro-preview` | Multimodal coding model. |
+
+### The Silent Substitution Guard (`_model_matches`)
+The engine contains an active guard:
+```python
+def _model_matches(requested: str, served: Optional[str]) -> bool:
+    if not served:
+        return True
+    return served == requested or served.startswith(requested + "-")
+```
+If Genspark ever accepts an ID but secretly substitutes a different model family, Apex prints a loud red warning indicating both the requested and served model.
+
+---
+
+## 5. Mixture-of-Agents (MoA) Mechanics
+
+### How MoA Works in Genspark
+Genspark's Mixture-of-Agents runs multiple LLMs in parallel on the server, aggregates their independent answers, and synthesizes a single consensus output.
+
+### The MoA Payload Protocol
+Through reverse-engineering of `ask_proxy` callers in Genspark's JavaScript bundles, the exact required payload structure was identified:
+```python
+payload = {
+    "type": "ai_chat",
+    "use_moa_proxy": True,
+    "moa_models": ["gpt-6-sol", "gpt-5.6-sol", "claude-opus-4-8"],
+    "models": ["gpt-6-sol", "gpt-5.6-sol", "claude-opus-4-8"], # MUST BE PRESENT!
+    "ai_chat_model": "gpt-6-sol",                               # MUST BE LEAD MODEL!
+    ...
+}
+```
+**Critical Discovery**: If `ai_chat_model` is left as the default (e.g. `claude-opus-5-5`), Genspark **ignores** MoA and executes as a plain single-model call! Setting `ai_chat_model` to the ensemble's first member and mirroring the list in `models` forces the server to execute the real multi-model pipeline.
+
+### MoA Presets Available in Apex
+1. **`hybrid-moa`** (`/model hybrid-moa`):
+   - **Ensemble**: `gpt-6-sol` + `gpt-5.6-sol` + `claude-opus-4-8`
+   - **Burn Rate**: ~13x credits.
+   - **Purpose**: Cross-vendor intelligence. Combines OpenAI's two newest Sol flagships with Anthropic Opus reasoning. The best quality-to-cost ratio for heavy architecture work.
+2. **`gpt-moa`** (`/model gpt-moa`):
+   - **Ensemble**: `gpt-5.5-pro` + `gpt-5.4-pro` + `gpt-5.6-sol` + `gpt-6-sol`
+   - **Burn Rate**: ~69x credits (contains two 30x Pro models).
+   - **Purpose**: Maximum raw reasoning power for the hardest mathematical, algorithmic, or security logic.
+3. **`genspark-moa`** (`/model genspark-moa`):
+   - **Ensemble**: `gpt-5.1-low` + `claude-sonnet-4-6` + `gemini-3.1-pro-preview`
+   - **Burn Rate**: ~3x credits.
+   - **Purpose**: General consensus coding.
+4. **Custom Ensembles**:
+   - `/moa <model1> <model2> ...` (e.g. `/moa gpt-6-sol claude-sonnet-5 gemini-3.8-flash`).
+   - `/moa off` disables MoA and restores the previous single model.
+
+---
+
+## 6. Subagent Architecture
+
+### Purpose
+Allows the primary model to delegate complex, research-heavy, or context-polluting sub-tasks to an independent child agent without bloating the main conversation transcript.
+
+### The Subagent Contract
+```xml
+<tool name="subagent" prompt="Explore /tmp/target and count lines of code" model="claude-4-5-haiku" max_steps="8">
+</tool>
+```
+- **Complete Isolation**:
+  - The subagent receives its own fresh `GensparkClient` (inheriting pool cookies).
+  - Its own dedicated `PersistentShell` (changes in `cd` or environment do not affect the parent).
+  - Its own dedicated `FileSnapshot` undo stack.
+  - Its own fresh `ContextManager`.
+- **Parent-Child Boundary**:
+  - The subagent **cannot** see the parent's conversation history. The prompt must be completely self-contained.
+  - **Depth-1 Guard**: Subagents have `allow_subagent=False`. A subagent cannot spawn further subagents.
+  - Only the subagent's **final text report** is returned to the parent as the tool output.
+- **UI Delimiters**:
+  ```
+  ╔═ 🤖 SUBAGENT ═ claude-4-5-haiku · max 8 steps
+  ║ task: Explore /tmp/target and count lines of code...
+  ⚡ Step 1 ...
+  ╚═ 🤖 SUBAGENT done — 184 chars returned to the parent
+  ```
+
+---
+
+## 7. Session Lifecycle & Persistence
+
+### Lossless Resumption Across Process Restarts
+Historically, exiting or crashing the CLI meant losing the server-side conversation thread. In v1.9.0+:
+- **Automatic State Persistence**: After every successful step, `save_thread_state()` writes the thread handle to `~/.apex/session.json`:
   ```json
   {
-      "ai_chat_model": "claude-opus-5-5",
-      "ai_chat_enable_search": false,
-      "ai_chat_disable_personalization": false,
-      "use_moa_proxy": false,
-      "moa_models": [],
-      "writingContent": null,
-      "sas_ask_origin": "typed",
-      "type": "ai_chat",
-      "project_id": "<uuid-or-null>",
-      "messages": [{"role":"user","id":"<uuid>","content":"<query>","pending":true,"sendStatus":"sending","_deepDiveStateNegContent":"<query>"}],
-      "user_s_input": "<query>",
-      "client_message_id": "<uuid>",
-      "g_recaptcha_token": "",
-      "is_private": true,
-      "push_token": "",
-      "session_state": {"steps":[],"messages":[{"role":"user","id":"<uuid>","content":"<query>","pending":true,"sendStatus":"sending","_deepDiveStateNegContent":"<query>"}]},
-      "last_seen_event_index": -1,
-      "chat_session_id": null
+    "project_id": "995fb522-8f24-4555-8c79-195a2f39b502",
+    "last_index": 48,
+    "owner": "/home/alaqmar/test/cookies.json",
+    "saved_at": "2026-09-29 02:15:50"
   }
   ```
-- **AccountPool Logic**:
-  - Automatically loads and deduplicates cookie jars matching `cookies*.json`.
-  - Rotates active accounts using thread-safe round-robin.
-  - On **HTTP 429**: Marks the account with a 60-second cooldown timestamp and fails over immediately to the next available account.
-  - On **HTTP 401 / 403**: Marks `account.auth_error = True`, permanently removing it from the active rotation, logs a warning, and fails over.
+- **`/resume`**: Re-attaches to the exact server-side thread. You can close your terminal, reboot your machine, reopen `apex`, type `/resume`, and continue with zero loss of context.
+- **`/reload`**: Re-scans all `cookies*.json` files into the live pool without terminating the session or resetting the current thread owner.
 
-### § 3.2. Multi-Turn Threading Protocol (CRITICAL)
-- **Step 1**: The harness passes `project_id = None` and `last_seen_event_index = -1`. The query contains the `_system_prompt()` concatenated with `User: {user_input}`. Genspark creates a project thread and returns `project_id` and `last_seen_event_index`.
-- **Step 2 and Subsequent Tool Turns**: The harness passes the existing `project_id` and `last_seen_event_index`. The query contains **ONLY** the new tool output:
-  ```text
-  Tool Result [{tool_name}]:
-  {output}
-  ```
-  **DO NOT RESEND CUMULATIVE TRANSCRIPTS TO AN EXISTING `project_id`!** (See Pitfall #1 below).
-- **Session Recovery**: If Genspark drops a stream or returns an empty text response, the harness resets the thread (`client.reset_thread()`), falls back to the local `ContextManager`, and re-anchors the session with the compacted context.
+### Character-Break Auto-Recovery
+On long multi-turn sessions (especially after switching models on large threads), highly aligned models (like Claude Opus) can sometimes notice that `Tool Result [...]` blocks look like user-injected text and refuse to continue:
+> *"I don't actually have local tool integration... I can't continue role-playing as Apex."*
 
-### § 3.3. Persistent PTY Shell
-- Built using `pty.openpty()` + `os.fork()` + `termios.tcsetattr`.
-- **Echo Disabled**: `attrs[3] = attrs[3] & ~termios.ECHO` prevents slave terminal echo from polluting stdout with commands, carriage returns, or prompt strings.
-- **Sentinel Exit Code Tracking**: Commands are executed with a unique per-session sentinel:
-  ```bash
-  {command}
-  __apex_ec=$?
-  echo "__APEX_{uuid}__:$__apex_ec"
-  ```
-  The harness polls the master file descriptor with `select.select()` until the sentinel appears, cleanly separating stdout/stderr from the exit code.
-- **Persistence**: Virtual environments, `cd`, shell variables (`export`), and background jobs persist across all steps in the session.
-
-### § 3.4. Local Tool Suite
-1. **`bash`**: Runs commands statefully inside the persistent PTY.
-2. **`read_file`**: Reads files with line numbers (`12 | content`), supporting `offset` and `limit`.
-3. **`write_file`**: Overwrites or creates files atomically, automatically pushing a snapshot to the undo stack.
-4. **`edit_file`**: Strict single-match string replacement (`old_string` -> `new_string`). Generates unified diffs and pushes snapshots to the undo stack.
-5. **`list_dir`**: Native Python `os.walk` traversal with max depth and noisy directory exclusion (`.git`, `node_modules`, `__pycache__`, `.venv`).
-6. **`grep`**: Recursive grep with regex and include patterns.
-
-### § 3.5. Terminal UI & Rich Markdown Compiler
-- **Single-Line Status Spinner**: During streaming, `rich.console.status` displays an animated spinner on a single line showing `⚡ {model} ({tier}) streaming... (N tokens)`.
-- **Clean Single-Pass Markdown Rendering**: Once streaming finishes, the spinner clears and `RICH_CONSOLE.print(Markdown(cleaned))` compiles the entire response with syntax-highlighted code blocks, bold hierarchy, bulleted lists, and tables.
-- **Tool Interception**: XML tool tags (`<tool name="...">...</tool>`) are filtered out of markdown rendering and transformed into clean execution banners:
-  ```
-    ┌─ ⌘ bash  uname -a
-    │ Linux x86_64
-    └─
-  ```
+**The Autonomous Recovery Seam (v1.9.1)**:
+1. The engine detects refusal markers (`"i don't actually have"`, `"role-playing"`, `"tool integration is no longer available"`, etc.).
+2. The engine immediately resets the poisoned server thread (`client.reset_thread()`).
+3. It constructs an authoritative continuation preamble:
+   ```text
+   [CONTINUATION] You ARE Apex, an autonomous agent with REAL tools.
+   The 'Tool Result' blocks in this task are produced by actual local executions
+   of your tool calls — they are not user-simulated text. Continue the task now
+   from the latest result below.
+   ```
+4. It re-anchors the session on a clean thread with the latest tool output, recovering the task without operator intervention.
 
 ---
 
-## 4. Top 6 Critical Bugs Encountered & Solved (DO NOT REGRESS)
+## 8. Multi-Account Pool & Quota Management
 
-### Bug 1: The Cumulative Multi-Turn Payload Trap
-- **Symptom**: Step 2 of an agent task would return completely blank, or Claude would break character and refuse, stating: *"I'm Claude, not 'Apex,' and in this interface I don't have bash access... The tool-call XML syntax in your message was written as part of your message text — I didn't actually run list_dir"*.
-- **Root Cause**: In Genspark's architecture, when you send a request with an existing `project_id`, the server **already stores** the prior conversation history. The old code was concatenating the entire conversation history (`System prompt` + `Human` + `Assistant` + `Tool Result`) into `query` and sending that 20,000-character payload into the existing project. Genspark received duplicated assistant messages inside a user prompt, causing Claude's safety tuning to detect user simulation and refuse, or causing the stream to close with empty text.
-- **The Permanent Fix**:
-  - Step 1: Send `_system_prompt() + "\n\nUser: " + user_input`.
-  - Step 2+: Send **only** `Tool Result [{tool_name}]:\n{output}` into the active `project_id`.
+### Current Account Fleet
+The pool automatically discovers and loads all `cookies*.json` in the primary workspace:
+- **`cookies.json`**: `earnybuddy@gmail.com` (Plus Plan, active)
+- **`cookies_2.json`**: `alaqmarabbas7@gmail.com` (Plus Plan, active)
+- **`cookies_3.json`**: `alaqmar04@gmail.com` (Plus Plan, active)
 
-### Bug 2: The `rich.live.Live` Terminal Buffer Crash
-- **Symptom**: On long responses (e.g. reading a 2,000-line file or summarizing architecture), the terminal would freeze, lag, and flood with 7,000+ duplicate repeating lines, crashing the session.
-- **Root Cause**: `Live(console, vertical_overflow="visible")` attempts to redraw the entire document by moving the terminal cursor up. When the document exceeds the physical terminal window height (e.g. 40 rows), ANSI cursor-up commands cannot cross the top of the terminal buffer. Consequently, on every single token delta, Rich was forced to reprint the entire document from line 1 downwards.
-- **The Permanent Fix**: Never use full-screen `Live` redraws for unbounded streaming text. Use `console.status` to show a live in-place single-line token counter while streaming, then compile and render the Markdown **once** via `RICH_CONSOLE.print(Markdown(cleaned))` when the stream finishes.
+### The 5-Hour Usage Window Mechanism
+Genspark enforces rolling 5-hour usage windows on accounts. When an account reaches its threshold, the server returns an HTTP 200 containing the text:
+> `AI Chat [5-hour limit](https://www.genspark.ai/helpcenter/membership-plans#usage) reached.`
 
-### Bug 3: PTY Slave Terminal Echo Corrupting Tool IO
-- **Symptom**: Command outputs in the persistent shell would include echoed commands, weird carriage returns (`\r\n`), or duplicate command lines.
-- **Root Cause**: Unix PTYs default to having `ECHO` enabled. Anything written to the master file descriptor was mirrored back as received output.
-- **The Permanent Fix**: Explicitly disable terminal echo on the slave PTY before starting bash:
-  ```python
-  attrs = termios.tcgetattr(slave)
-  attrs[3] = attrs[3] & ~termios.ECHO
-  termios.tcsetattr(slave, termios.TCSANOW, attrs)
-  ```
-
-### Bug 4: `find: 'standard output': Broken pipe` in `list_dir`
-- **Symptom**: `list_dir` would fail or output ugly stderr messages: `find: ‘standard output’: Broken pipe\nfind: write error`.
-- **Root Cause**: Running `find ... | head -300` in bash causes `head` to close its input pipe after 300 lines. The still-running `find` process receives a `SIGPIPE` and logs write errors to stderr.
-- **The Permanent Fix**: Replaced the shell command with native Python `os.walk`, providing clean relative paths, sorted folder hierarchies, and zero pipe errors.
-
-### Bug 5: Premature Tag Termination in `write_file` (Inner `</tool>` Truncation)
-- **Symptom**: Files containing code examples or documentation mentioning tools were cut in half on disk, and the remaining 10,000+ characters spilled directly into the terminal chat as unparsed text ("during writing files many things were filling out").
-- **Root Cause**: Naive non-greedy regex `r'<tool\s+name=["\'](\w+)["\']([^>]*)>(.*?)</tool>'` terminated at the FIRST `</tool>` found inside the file body (such as an example `<tool name="bash">ls</tool>`). The parser cut the file in half, wrote the truncated fragment to disk, and dumped the second half into the chat viewport.
-- **The Permanent Fix**: Implemented depth-aware tag matching in `ToolParser`. When scanning `write_file` or `edit_file`, inner `<tool>` tags increment depth, and only the matching outer `</tool>` closes the call. Also automatically salvages unclosed tool tags at EOF.
-
-### Bug 6: Spurious Tool Execution Loops from Markdown Code Fences
-- **Symptom**: When the model summarized a completed task and cited an example (e.g. `Here is the example: ```xml <tool name="bash">echo test</tool> ``` `), the harness extracted `echo test` as a live command and ran it in an infinite multi-step loop.
-- **Root Cause**: Tool parser scanned the entire raw message without ignoring markdown code blocks (` ``` `) or inline backticks (` ` `).
-- **The Permanent Fix**: Identified all code fence and backtick spans and masked them out before extracting tool tags. Any `<tool>` tag inside backticks or code blocks is treated strictly as documentation and never executed.
+**How Apex Handles This**:
+- The client detects `"5-hour limit"` in the response text.
+- It elevates the account's cooldown to **1,800 seconds (30 minutes)** instead of the standard 60-second rate-limit cooldown.
+- It rotates immediately to the next available account in the pool.
+- Any successful request on an account automatically resets its cooldown back to 60 seconds.
 
 ---
 
-## 4.1 Production Hardening (v1.1.0) — Applied After Subagent E2E Test Suite
+## 9. Complete Bug & Fix Ledger (Bugs #1–#9 + Residuals N1–N4)
 
-An independent QA subagent ran an 11-scenario live-API acceptance suite (`/tmp/apex_e2e/`): **11/11 PASS**, zero crashes, zero floods, zero refusals, zero broken pipes. The following hardening was applied before sign-off:
+This ledger documents the complete set of structural defects diagnosed, repaired, and adversarially verified in Apex:
 
-1. **SIGINT redesign** — Removed the global custom `signal.signal(SIGINT, ...)` handler that swallowed Ctrl+C (it made the engine's `except KeyboardInterrupt` dead code and let runaway streams keep burning tokens). Now: Ctrl+C during a task aborts only the task (`AgentEngine.run` wraps the whole loop) and the REPL session survives; Ctrl+C at the prompt clears the line without exiting; Ctrl+D exits.
-2. **PTY death auto-restart** — `PersistentShell.run()` now retries once on `OSError`/EOF (e.g. a command ran `exit` or bash crashed): restarts the forked bash and re-runs the command. Unit-tested with an explicit `exit` command.
-3. **Network failover** — Transient `ConnectionError`/`Timeout` now fail over to the next pool account exactly like 429s (2s backoff), instead of propagating immediately.
-4. **Edit diff truncation** — `edit_file` diffs now pass through `_truncate` so a huge replacement can't blow up the model context.
-5. **Multi-tool-call guard** — If the model emits several tool calls in one response, only the first executes and the tool result carries an explicit `[note] N additional tool call(s) ... IGNORED` so the model self-corrects to one-call-per-response.
-6. **Markdown render cap** — `_render_markdown()` caps single-pass rendering at 20,000 chars with a visible truncation marker (defense-in-depth against terminal floods).
-7. **Undo stack cap** — `FileSnapshot` keeps at most 50 snapshots (FIFO).
-8. **Truncation honesty (E2E defect D1)** — Stacked truncation (tool layer 80/120 lines + UI layer 30/30) previously reported a misleading omission count. Now the tool layer notes include original totals (`[... 300 of 500 lines omitted ...]`), the UI always surfaces those notes, and the UI reports its own layer honestly (`… 143 display lines collapsed …`).
-9. **POSIX trailing newline** — `write_file` appends a final `\n` when missing; line counts in the success message now count actual lines.
-10. **UI banner details** — `list_dir` banners show `path (depth N)`; `grep` banners show `pattern in path`. Dead imports (`subprocess`, `field`, `Live`, `signal`) removed.
+### Bug #1: Cumulative Multi-Turn Payload Trap
+- **Symptom**: Step 2+ of a task would return empty text or trigger model identity refusals.
+- **Root Cause**: Resending cumulative transcripts into an existing `project_id`. Genspark stores conversation history server-side.
+- **Fix**: Step 1 sends system prompt + user input. Step 2+ sends **only** `Tool Result [{tool}]:\n{output}`.
 
-**Test artifacts**: unit suite `/tmp/apex_unit_tests.py` (26/26 PASS); E2E logs `/tmp/apex_e2e/`.
+### Bug #2: Terminal Flood from `rich.live.Live`
+- **Symptom**: Long responses caused terminal freezing and flooded 7,000+ duplicate lines into scrollback.
+- **Root Cause**: `Live(vertical_overflow="visible")` cursor-up redraws fail when content exceeds terminal window height.
+- **Fix**: Replaced live document redraws with a single-line animated token counter (`rich.console.status`), followed by single-pass compilation (`rich.markdown.Markdown`) upon stream completion.
 
----
+### Bug #3: Indented Edits & Missing Separator Deletion
+- **Symptom**: Code written with indentation doubled its whitespace; edits missing `---` silently deleted matched code.
+- **Root Cause**: Tag bodies preserved outer indentation; regex split failed on indented separators; fallback replaced `old_string` with `""`.
+- **Fix**: `textwrap.dedent` applied to tool bodies; separator regex changed to `\n[ \t]*-{3,}[ \t]*\n`; missing separator returns `edit_error` and refuses to touch disk.
 
-## 4.2 Windows Support & Setup Guide (v1.2.0)
+### Bug #4: Shell Timeout Desynchronization
+- **Symptom**: After a single bash command timed out, all subsequent commands returned the output of the *previous* command.
+- **Root Cause**: The timed-out command continued running in the background, consuming stdin and delaying sentinel output.
+- **Fix**: On timeout, PTY writes `\x03` (Ctrl+C) to terminate the foreground process and re-sends the sentinel line. If unkillable, the shell process cleanly restarts.
 
-1. **Import safety** — `pty`, `termios`, `fcntl`, `struct`, `select` are now imported inside a `if os.name == "posix":` guard (they don't exist on Windows and previously crashed at import). `readline` is a guarded optional import. The harness now imports cleanly on Windows.
-2. **Platform-adaptive shell** — `PersistentShell` is now an alias: `_PosixShell` (unchanged PTY implementation) on POSIX, `_WindowsShell` on Windows. The Windows backend runs a persistent `cmd.exe /Q /K /D` with piped stdio (pipes don't echo, so no ECHO workaround needed), a daemon reader thread feeding a `queue.Queue` (Windows pipes don't support `select`), a `%errorlevel%` sentinel for exit codes, `chcp 65001` UTF-8, timeout desync re-sync, and auto-restart if cmd dies. Constructor accepts `shell_cmd`/`ec_expr` overrides for testability.
-3. **Platform-aware model guidance** — `_system_prompt()` now uses `platform` instead of `os.uname()` (another latent Windows crash) and instructs the model to use Windows syntax (`dir`, `type`, `del`, `where`) on cmd.exe.
-4. **Native Python grep** — `grep` uses a pure-Python recursive regex search (`_grep_python`, include-glob filtering, 2MB file cap, 80-result cap) on Windows instead of shell `grep`.
-5. **UI/UX** — `/clear` runs `cls` on Windows; the banner shows the active shell backend; `apex.cmd` launcher auto-picks `py` or `python`.
-6. **Setup guide** — `SETUP.md` covers dependencies, cookie export (with the exact JSON shape), multi-account jars, the platform behavior matrix, optional env vars, a WSL2 alternative, and troubleshooting.
+### Bug #5: Parser Nesting & Tag Swallowing
+- **Symptom**: Writing documentation or code containing `<tool` mentions truncated files and dumped the second half into chat.
+- **Root Cause**: Non-greedy regex `.*?` matched the first inner `</tool>` tag.
+- **Fix**: Depth-aware parser tracks nesting depth for valid `<tool name="...">` tags. Code blocks and inline backticks are masked prior to parsing. Minimal-combination backtracking resolves unclosed inner examples.
 
----
+### Bug #6: Shell Injection via `grep`
+- **Symptom**: Search patterns containing apostrophes hung the shell; crafted patterns could execute shell commands.
+- **Root Cause**: Grep was implemented by interpolating arguments into a bash command string.
+- **Fix**: Replaced shell grep with a pure Python recursive regex search across all operating systems.
 
-## 4.3 Skill System (v1.4.0)
+### Bug #7: Execution of Truncated Streams
+- **Symptom**: If an upstream connection dropped mid-tag, the harness wrote half-finished files.
+- **Root Cause**: Stream completion was not gated on the official `FINISHED` status event.
+- **Fix**: `GensparkClient` tracks `finished=True` only when `project_field status=FINISHED` is received. The engine verifies tag balance and retries severed streams.
 
-1. **SkillStore** — discovers markdown skill packs with `name`/`description` frontmatter from (in override order) bundled repo `skills/` → `~/.apex/skills/` → `<cwd>/.apex/skills/` → extra dirs. Name lookup is case-insensitive; missing frontmatter falls back to filename stem + first content line.
-2. **`skill` tool** — `<tool name="skill" name="X">` returns the body prefixed with `[skill loaded: X — apply these instructions...]`. Unknown names error with the available list. Progressive disclosure: the system prompt carries only the name/description list; bodies enter context on load.
-3. **REPL** — `/skills` lists packs with source dir and queued state; `/skill <name>` queues a pack which is injected into the step-1 prompt of the next task (`engine.pending_skills`).
-4. **Bundled packs** (in `skills/`, git-whitelisted): `git-workflow`, `debugging`, `code-review`, `security-recon` (scope-gate first, authorized testing only), `python-testing`, `writing-docs`.
-5. **Parsing safety** — skill bodies frequently contain tool examples; they are returned as tool results / prompt text (never re-parsed), and any fenced examples the model echoes back are handled by the existing code-fence masking.
+### Bug #8: History Expansion & Crash Vectors
+- **Symptom**: Commands containing `!` failed with wrong exit codes; non-numeric attributes (`offset="abc"`) crashed the process; unknown tool names ended the session.
+- **Root Cause**: Bash interactive history expansion (`set -H`); unhandled `ValueError` in int coercion; unknown tools treated as non-tool final turns.
+- **Fix**: Added `set +H` to bash initialization; added `_safe_int()` helper; unknown tools return self-correcting error messages listing available tools so the ReAct loop continues.
 
-## 4.5 External-Review Fixes (v1.7.0 → v1.7.1)
+### Bug #9: Correctness Seams (CWD, CRLF, Atomic Writes, Thread Pinning)
+- **Symptom**: Relative paths ignored bash `cd`; CRLF files were converted to LF; interrupted writes corrupted files; thread failover caused empty response loops.
+- **Root Cause**: Python `Path` resolved against harness process CWD; `read_text()` normalized newlines; direct file opening without temp files; threads rotated across incompatible accounts.
+- **Fix**:
+  - Shell sentinel reports `$PWD` via `@CWD@`; all tool paths resolve against shell CWD.
+  - `_read_preserved()` detects CRLF and preserves line endings upon write.
+  - `_atomic_write()` writes to sibling `.tmp` file and atomically commits via `os.replace`.
+  - `project_owner` pins threads to the creating account; account rotation raises `ThreadResetByFailover` to trigger a clean full-context re-anchor.
 
-An independent code review found 7 defects; all were fixed and then re-verified by a hostile QA subagent (7/7 FIXED, 2 live E2E tasks PASS, and its 2 residual new-bugs also fixed):
-
-- **#3 Edits**: tool bodies are dedented (uniform tag-relative indentation no longer corrupts files); the `---` separator is recognized when indented; a MISSING separator now refuses the edit (`edit_error` routed through `_exec`) instead of deleting the matched code; empty `old_string` is refused (no fake success on empty files).
-- **#4 Timeout desync**: on timeout the harness sends Ctrl+C to the PTY and RE-SENDS the sentinel line — interruptible commands keep the shell's cwd/env state; only truly unkillable commands cost a shell restart. Either way the next command returns ITS OWN output.
-- **#5 Parser nesting**: only tags with a valid `<tool name="...">` header affect nesting (bare `<tool…` mentions are content); unclosed nested opens are resolved by minimal-combination backtracking (1 skip, then pairs, capped); a pathological tag that still can't resolve becomes a `parse_error` result instead of salvaging the message tail into a file.
-- **#6 grep de-shelled**: `grep` is pure Python on ALL platforms — patterns with quotes/apostrophes just work and crafted patterns (`'; touch x; '`) cannot execute commands.
-- **#7 Truncated streams**: `stream()` reports `finished` (True only on the FINISHED event); the engine detects open/close tag imbalance and retries the step instead of executing a half-written file; a second cut-off ends the task.
-- **#8 Exit codes/silent crashes**: `set +H` disables history expansion (`!` safe, truthful exit codes); non-numeric attributes are dropped via `_safe_int` (no task crash); unknown tool names become self-correcting error results listing available tools instead of ending the task; the parser itself is wrapped so it can never kill a task.
-- **#9 Correctness**: file-tool paths resolve against the SHELL's cwd (sentinel carries `$PWD`/`%CD%`; a `cd` in bash redirects relative writes); CRLF files stay CRLF through edits; writes go through temp-file + `os.replace` (atomic, no `.apex-*.tmp` leftovers); conversation threads are PINNED to the account that owns them — rotation to another account raises `ThreadResetByFailover` and the engine re-sends full context on a fresh thread (this also explains historical "empty response" resets with multiple accounts).
-
-Also added: per-step token usage line (`[tokens: prompt … · completion … · total … | served: …]`) from `session_state._llm_usage`, and cookie-expiry warnings at startup (expired `session_id` disables the account; <7 days warns).
-
-## 4.3.1 MoA Payload Truth + Subagents (v1.7.6 → v1.8.0)
-
-- **MoA billing fix (user-reported)**: selecting gpt-moa still billed opus — the harness sent only `moa_models`+`use_moa_proxy` while leaving `ai_chat_model` at the base model. The web UI's payload builder (extracted from the JS bundle) shows MoA mode ALSO sends the ensemble in a `models` field with `ai_chat_model` set to the ensemble LEAD. `stream()` now does exactly that; selecting any MoA sets the primary/billed model to the lead and `/moa off` restores the previous single model.
-- **MoA presets**: `genspark-moa` (3 models) and `gpt-moa` = gpt-5.5-pro + gpt-5.4-pro + gpt-5.6-sol + **gpt-6-sol** (4-model ensemble works; gpt-6-sol/gpt-6-luna discovered in the live page payload and server-verified). Custom ensembles via `/moa id1 id2 ...`, `/moa off`. Substitution guard is skipped in MoA mode (ai_chat_model mismatch is expected there).
-- **What "served model" means in MoA**: the stream contains exactly ONE `message_result` per turn — `_llm_model` names only the LEAD/synthesizer (or is absent). Ensemble members run server-side and are invisible to the client; they surface only on the billing/usage page. Verified by raw SSE capture.
-- **Subagents (v1.8.0)**: `<tool name="subagent" prompt="..." model="..." max_steps="12">` spawns a fresh, isolated Apex instance — own Genspark thread, own PTY shell, own undo stack, same skills. It cannot see the parent conversation (prompts must be self-contained), cannot spawn further subagents (depth 1), and returns its final report as the tool result. UI: `╔═ 🤖 SUBAGENT` header/footer banners; sub-steps render inline.
-- **Soft usage-limit failover**: Genspark returns per-account caps ("AI Chat [5-hour limit]") as normal 200 text. `stream()` detects this, marks the account cooldown, and fails over — instead of relaying the notice as an answer.
-
-## 4.4 Internet-Sourced Skill Library (v1.5.0)
-
-The bundled packs were upgraded from hand-rolled to **adaptations of the most-recommended open agent skills**, researched from the 2026 ecosystem (consensus sources: [obra/superpowers](https://github.com/obra/superpowers) — MIT, the most-praised methodology collection; [VoltAgent/awesome-agent-skills](https://github.com/VoltAgent/awesome-agent-skills) aggregate; Anthropic's official skills).
-
-- **Adapted from superpowers (MIT, attributed in each pack)**: `test-driven-development` (Iron Law + mandatory RED/GREEN verification + rationalization table), `systematic-debugging` (4 phases, "no fixes without root cause", red-flag list — replaces the earlier hand-rolled `debugging.md`), `verification-before-completion` (evidence-before-claims gate + claim→evidence table), plus `writing-plans` and `brainstorming` adapted to Apex's auto-execute mode (plans/designs live in chat, not disk).
-- **Apex-specific tailoring in every pack**: verification via fresh `bash` runs with quoted output, surgical `read_file` paging while tracing code, `grep` for finding working reference code, the write_file contract, and the no-unsolicited-files rule.
-- **Upgraded in place**: `git-workflow` (branch finishing hygiene), `python-testing` (red-green regression rule, cross-linked to TDD). **Unchanged**: `code-review`, `security-recon`, `writing-docs` (already aligned with the canon's severity-based review format).
-- Skill set is now 10 packs; `SkillStore` needed no code changes (pure content update).
+### Residuals N1–N4:
+- **N1**: Routed `edit_error` directly through `_exec`; blocked empty `old_string` from faking success on empty files.
+- **N2**: Upgraded backtracking to test multi-trap combinations (up to 4 unclosed tags).
+- **N3**: Malformed tags with unresolvable closes return explicit `parse_error` instead of salvaging message tails into files.
+- **N4**: Re-sending sentinel after Ctrl+C preserves shell CWD and environment across normal command timeouts.
 
 ---
 
-## 5. Model Catalog Reference
+## 10. Cross-Platform Runtime & Global Setup
 
-The default model is **`claude-opus-5`** — verified via the server-reported `message_result.session_state._llm_model` field.
+Apex runs natively on **Linux**, **macOS**, and **Windows 10/11** (as well as WSL2).
 
-> **Model truth (v1.6.1, user-corrected):** the web UI's **"Claude Opus 5.5" maps to API id `claude-opus-5-5` (hyphen, not dot)** — verified: server-reported `_llm_model == claude-opus-5-5` and the model self-identifies as Opus 5.5. Dot-variant ids (`opus-5.5`, `claude-opus-5.5`) are **not real** — HTTP 200 but silently serve `claude-sonnet-4-5-20250929`. `claude-opus-4-8`/`-4-7` honor as `...-extended-cache` serving variants. The current model list is extractable from the agents-page payload: `GET /agents?type=ai_chat` and regex for `claude-opus[a-z0-9._-]*` (this is how `claude-opus-5-5` was found). The harness warns loudly on any silent substitution (`_model_matches()` guard).
-
-| Model ID | Label | Tier | Class | Notes |
-|---|---|---|---|---|
-| `claude-opus-5-5` | Claude Opus 5.5 | **5x** | Reasoning | **Current Default**. Verified honored — hyphen id, dot id is fake |
-| `claude-opus-5` | Claude Opus 5 | 5x | Reasoning | Honored |
-| `claude-opus-4-8` | Claude Opus 4.8 | 5x | Reasoning | Honored (serves as `-extended-cache` variant) |
-| `claude-opus-4-7` | Claude Opus 4.7 | 5x | Reasoning | Honored (serves as `-extended-cache` variant) |
-| `claude-sonnet-5` | Claude Sonnet 5 | 2x | Coding | High speed, strong coding |
-| `claude-sonnet-4-6` | Claude Sonnet 4.6 | 3x | Coding | Reliable coding workhorse |
-| `claude-4-5-haiku` | Claude Haiku 4.5 | 1x | Fast | Fast, lightweight tasks |
-| `gpt-5.6-sol` | GPT-5.6 Sol | 4x | Coding | OpenAI flagship coding model |
-| `gpt-5.5-pro` | GPT-5.5 Pro | 30x | Reasoning | Deep reasoning, high credit cost |
-| `gemini-3.8-flash` | Gemini 3.8 Flash | 0.75x | Fast | Fast, cheap generalist |
-| `genspark-moa` | Mixture of Agents | — | MoA | Combines GPT-5.1 + Sonnet 4.6 + Gemini 3.1 Pro |
-
----
-
-## 6. How to Run & Common Workflows
-
-### Launching the Interactive REPL
+### Running Globally from Any Directory
+Apex is symlinked to `~/.local/bin/apex` (which is on the user's `$PATH`):
 ```bash
-cd /home/alaqmar/test
-./apex
+# Launch interactive REPL from ANY project folder:
+apex
+
+# Run a single non-interactive task:
+apex -q "Run pytest and report any failures"
+
+# Select model or MoA preset:
+apex --model hybrid-moa
+apex --model gpt-moa
 ```
 
-### Running Non-Interactive Single Tasks
-```bash
-./apex -q "Explore /home/alaqmar/Desktop/Auto Bug Bounty and list all active gates"
-```
+### Cookie Resolution Order
+When running globally outside `/home/alaqmar/test`:
+1. `./cookies.json` in the current working directory (if project-specific accounts exist).
+2. Falls back automatically to `/home/alaqmar/test/cookies.json` (the global install directory).
 
-### Selecting a Specific Model
-```bash
-./apex --model gpt-5.6-sol -q "Refactor this function"
-./apex --model claude-4-5-haiku  # Lightweight interactive session
-```
-
-### Enabling Web Search
-```bash
-./apex --search -q "Latest CVEs in Spring Framework September 2026"
-```
-
-### In-REPL Slash Commands
-- `/model [name]` — Switch model or view catalog
-- `/search [on|off]` — Toggle web search
-- `/accounts` — View health and request counts of cookie accounts
-- `/undo` — Revert the last file change
-- `/reset` — Clear conversation and reset upstream Genspark thread
-- `/clear` — Clear the terminal viewport
-- `/steps [n]` — Update max steps (default: 30)
-- `/history` — Check conversation turn count and character usage
-- `/help` — Display help menu
-- `/exit` (or `/q`) — Exit cleanly
+### Windows Native Support (`apex.cmd`)
+- On Windows, `apex_harness.py` automatically initializes `_WindowsShell` (`cmd.exe /Q /K /D`) instead of PTY bash.
+- PTY and termios imports are safely guarded under `if os.name == "posix":`.
+- System prompt dynamically instructs the model to use Windows command syntax (`dir`, `type`, `del`, `where`).
 
 ---
 
-## 7. Account Management & Cookie Rotation
+## 11. Native File-Upload API Recon & Roadmap
 
-- Active cookies are stored in `/home/alaqmar/test/cookies.json`.
-- When the user provides fresh cookies:
-  1. Save them directly to `/home/alaqmar/test/cookies.json` as a JSON array of cookie objects.
-  2. The harness automatically discovers all `cookies*.json` in the directory.
-  3. Ensure the cookies include `session_id`, `c1`, and `c2`.
+### Reverse-Engineered Upload Flow
+Audit of Genspark's live JavaScript bundles revealed the exact 3-step file upload architecture used by the web UI:
+
+1. **Step 1: Obtain Presigned Upload URL**
+   - **Endpoint**: `POST https://www.genspark.ai/api/agent-files/upload-url`
+   - **Payload**: `{"agent_id": "<uuid>", "filename": "report.pdf"}`
+   - **Response**: `{"status": "success", "data": {"upload_url": "https://...blob.core.windows.net/...", "token": "<token>"}}`
+2. **Step 2: Binary Upload**
+   - **Method**: `PUT <upload_url>`
+   - **Headers**: `x-ms-blob-type: BlockBlob`, `Content-Type: <mime_type>`
+   - **Body**: Raw binary payload.
+3. **Step 3: Confirm Upload**
+   - **Endpoint**: `POST https://www.genspark.ai/api/agent-files/confirm-upload`
+   - **Format**: `multipart/form-data` (`agent_id`, `filename`, `token`, `mime_type`)
+   - **Response**: `{"status": "success", "file": {"id": "<file_id>", "filename": "...", ...}}`
+4. **Step 4: Attach to Chat**
+   - In `ask_proxy`, files are attached under `attached_files` in the run configuration or `files` array inside message objects.
+
+### Implementation Status
+- **Current State**: Mapped and documented. The harness currently embeds file text into prompts.
+- **Roadmap**: Implementing this client flow in `GensparkClient` will allow uploading large PDFs, spreadsheets, and binaries for server-side indexing, as well as enabling native multimodal vision support.
 
 ---
 
-## 8. Potential Next Tasks for Continuing Agents
+## 12. Operator Quick Reference
 
-1. **Auto-Cookie Refresh**: Build a lightweight background script using `sniffer.mjs` (Playwright) to automatically refresh cookies before expiration.
-2. **Sub-Agent Fan-Out**: Add a `/delegate` command to spawn secondary `AgentEngine` instances for isolated parallel subtasks.
-3. **Workspace Linking**: Apex is already verified working seamlessly inside `/home/alaqmar/Desktop/Auto Bug Bounty` (Auto Bug Bounty / Nyxstrike). You can run `./apex` directly against any directory on the workstation.
+### In-REPL Commands
+- `/model [name]` — View model catalog or switch active model / MoA preset.
+- `/moa <id1> <id2> ...` — Configure a custom multi-model ensemble on the fly.
+- `/moa off` — Disable MoA and return to single-model execution.
+- `/skills` — List all installed skill packs and their discovery sources.
+- `/skill <name>` — Queue a specific skill pack to inject into the next step.
+- `/accounts` — Display real-time account pool health, cooldowns, and request counts.
+- `/reload` — Re-scan cookie files on disk without losing conversation state.
+- `/resume` — Re-attach to the last saved thread handle after a restart.
+- `/undo` — Revert the last file modification made by the agent.
+- `/reset` — Clear conversation context and start a clean thread handle.
+- `/clear` — Clear terminal screen (`cls` on Windows).
+- `/history` — Check token/character budget usage.
+- `/exit` (or `/q`) — Exit cleanly.
+
+### Testing & Verification Commands
+```bash
+# Run unit test suite (26 tests):
+python3 /tmp/apex_unit_tests.py
+
+# Run Windows shell machinery test suite (18 tests):
+python3 /tmp/apex_win_tests.py
+
+# Run adversarial bug verification suite (34 tests):
+python3 /tmp/apex_review_tests.py
+
+# Run live end-to-end smoke test:
+apex -q "Reply with one sentence confirming your model and tools."
+```
