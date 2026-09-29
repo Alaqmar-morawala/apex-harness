@@ -16,6 +16,10 @@
 !skills/
 !skills/**
 
+# Allow regression test suites
+!tests/
+!tests/**
+
 # Allow project documentation
 !APEX_HARNESS.md
 !APEX_HARNESS_HANDOFF.md

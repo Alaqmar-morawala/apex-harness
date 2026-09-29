@@ -232,12 +232,13 @@ after tool work, task-derived still allowed, budget exhausted, no tool).
 
 | Suite | Command | Result |
 |---|---|---|
-| unit | `python3 /tmp/apex_unit_tests.py` | 26/26 |
-| Windows shell machinery | `python3 /tmp/apex_win_tests.py` | 18/18 |
-| adversarial / bug-verification | `python3 /tmp/apex_review_tests.py` | **104/104** (was 90; +14 for v1.9.9) |
+| unit | `python3 ~/test/tests/apex_unit_tests.py` | 26/26 |
+| Windows shell machinery | `python3 ~/test/tests/apex_win_tests.py` | 18/18 |
+| adversarial / bug-verification | `python3 ~/test/tests/apex_review_tests.py` | **104/104** (was 90; +14 for v1.9.9) |
 
-> ⚠️ **These live in `/tmp` and are NOT in the repo.** `.gitignore` is `*` + an allowlist, and
-> `tests/` isn't allowlisted. Reboot wipes the only regression suite. See §9.5.
+> ✅ **These are versioned in the repo at `~/test/tests/`** — `.gitignore` allowlists `tests/`,
+> and they were moved out of `/tmp` and committed on 2026-09-29, so reboots no longer wipe them.
+> See §9.5 for the remaining live-run half of that item.
 
 **Docs kept in sync with the code:** `APEX_HARNESS_HANDOFF.md` (header now v1.9.9, ledger
 heading `Bugs #1–#10`, new **Bug #10** entry, suite counts), `README.md` status line, and
@@ -289,9 +290,8 @@ heading `Bugs #1–#10`, new **Bug #10** entry, suite counts), `README.md` statu
    (a night level would legitimately fail).
 5. **Prove the nudge fix on a *live* task + move the test suites into the repo.**
    v1.9.9 now has 14 unit checks (incl. the greedy-prose bug), but no live agent run has
-   re-entered the no-tool loop end-to-end. Separately: all three suites live in `/tmp` and are
-   **not versioned** — `.gitignore` is `*` + allowlist and has no `tests/` entry. Moving them
-   into the repo is the highest-value small task left.
+   re-entered the no-tool loop end-to-end. Suite-move half is **done** (2026-09-29): all three
+   suites now live in `~/test/tests/`, allowlisted in `.gitignore` and committed — see §7.
 6. **Re-export after any `main.gd` change** — `build/ApexGame.x86_64` currently includes the
    hooks, but the binary is an artifact, not source of truth.
 
@@ -333,10 +333,10 @@ cd ~/games/ApexGame && ./validate.sh --shot         # → ok [pixel] mean≈47-4
 python3 -c "import sys; sys.path.insert(0,'/home/alaqmar/test'); from apex_harness import SkillStore; \
 print('project skills:', [x['name'] for x in SkillStore().list() if x['source']=='project'])"
 #   → project skills: ['godot-4']
-# Test suites (⚠️ live in /tmp — not versioned, wiped on reboot):
-python3 /tmp/apex_unit_tests.py       # → 26 passed, 0 failed
-python3 /tmp/apex_win_tests.py        # → 18 passed, 0 failed
-python3 /tmp/apex_review_tests.py     # → 104 passed, 0 failed
+# Test suites (versioned in the repo at ~/test/tests/):
+python3 ~/test/tests/apex_unit_tests.py   # → 26 passed, 0 failed
+python3 ~/test/tests/apex_win_tests.py    # → 18 passed, 0 failed
+python3 ~/test/tests/apex_review_tests.py # → 104 passed, 0 failed
 ```
 
 ---

@@ -464,14 +464,14 @@ Audit of Genspark's live JavaScript bundles revealed the exact 3-step file uploa
 
 ### Testing & Verification Commands
 ```bash
-# Run unit test suite (26 tests):
-python3 /tmp/apex_unit_tests.py
+# Run unit test suite (26 tests; suites are versioned in the repo at ~/test/tests/):
+python3 ~/test/tests/apex_unit_tests.py
 
 # Run Windows shell machinery test suite (18 tests):
-python3 /tmp/apex_win_tests.py
+python3 ~/test/tests/apex_win_tests.py
 
 # Run adversarial bug verification suite (104 tests):
-python3 /tmp/apex_review_tests.py
+python3 ~/test/tests/apex_review_tests.py
 
 # Run live end-to-end smoke test:
 apex -q "Reply with one sentence confirming your model and tools."
