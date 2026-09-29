@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.9.7"
+VERSION = "1.9.8"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -199,6 +199,26 @@ def _upstream_declined(text: str) -> bool:
     """True if Genspark's content filter refused instead of the model."""
     t = text.strip().lower().replace("’", "'")
     return t.startswith("the model declined to answer")
+
+
+def _is_vague_greeting(user_input: str) -> bool:
+    """True if the input carries no tool intent (bare greeting/smalltalk).
+
+    The no-tool nudge must NOT fire here: demanding `pwd && ls` for a "hey"
+    makes literal models repeat the same listing every step while the loop
+    waits for a task that never comes.
+    """
+    t = (user_input or "").strip().lower().strip("!.,?\"' ")
+    if not t:
+        return True
+    if len(t) > 60:
+        return False
+    if any(w in t for w in ("/", ".", "\\", "list", "read", "run", "show",
+                            "see ", "look", "check", "find", "grep", "file",
+                            "dir", "test", "fix", "build", "write", "edit",
+                            "context", "memory", "handoff", "project", "code")):
+        return False
+    return True
 
 
 def _moa_burn(ensemble: List[str]) -> str:
@@ -2200,6 +2220,11 @@ class AgentEngine:
             # layer breaks the tool contract structurally (it answers ABOUT
             # tools instead of emitting them, then refuses the nudge as
             # "untruthful"). Nudging it only burns credits; re-anchor instead.
+            # Vague-greeting guard (v1.9.8): the nudge fires ONLY for tool
+            # tasks. A bare greeting ("hey") has no tool intent — demanding
+            # `pwd && ls` for it makes the model repeat the SAME listing every
+            # step (gpt-5.5-pro looped `pwd && ls` 3x at 30x). Greetings get a
+            # normal chat reply instead.
             if not calls and step < self.max_steps and not self._stop:
                 if self.moa:
                     print(C.s("\n  [MoA ensemble answered without a tool call — MoA breaks the Apex tool contract; use /moa off and re-run, or pick a single model]", C.RED))
@@ -2208,7 +2233,8 @@ class AgentEngine:
                     final = cleaned or text
                     break
                 nudge_tool = self._nudge_tool_for(user_input, last_tc)
-                if nudge_tool and not _refusal_hit(text) and not _upstream_declined(text):
+                if (nudge_tool and not _is_vague_greeting(user_input)
+                        and not _refusal_hit(text) and not _upstream_declined(text)):
                     print(C.s(f"\n  [no tool call — nudging for {nudge_tool}...]", C.YELLOW))
                     nudge = (
                         f"That reply had no tool call, so nothing happened. "
@@ -2264,6 +2290,20 @@ class AgentEngine:
             self.ctx.add("tool_result", output, tool_name=tc.name, step=step)
             last_tc = tc
             last_out = output
+            # Repeat-tool guard (v1.9.8): if the model emits the SAME tool call
+            # twice in a row (e.g. gpt-5.5-pro answering every nudge with an
+            # identical `pwd && ls`), the loop is stuck — the SECOND identical
+            # call's result is already in context. Tell it so explicitly and
+            # demand the NEXT step instead of executing a duplicate.
+            # (Execution still happened once; this only stops the loop.)
+            if step >= 2 and self._same_as_last_tool(tc):
+                output_note = (
+                    f"\n[note] You already ran this exact {tc.name} call and its "
+                    f"result is in context above. DO NOT repeat it — take the NEXT "
+                    f"step of the task, or write your final summary with no tool call.]"
+                )
+                self.ctx.add("tool_result", output_note, tool_name="note", step=step)
+                last_out = output + output_note
 
         if step >= self.max_steps and not self._stop:
             print(C.s(f"\n  [step limit {self.max_steps} reached]", C.YELLOW))
@@ -2360,6 +2400,15 @@ class AgentEngine:
         if tool == "bash":
             return "pwd && ls"
         return ""
+
+    def _same_as_last_tool(self, tc) -> bool:
+        """True if this tool call duplicates the previous step's call."""
+        prev = [t for t in self.ctx.history if t.role == "tool_result" and t.tool_name not in ("note", "error")]
+        if len(prev) < 2:
+            return False
+        # Compare against the tool_result BEFORE this step's (already added).
+        # A duplicate means same tool name and same output body.
+        return prev[-1].tool_name == tc.name and prev[-1].content == prev[-2].content
 
     def _run_subagent(self, prompt: str, model: str, steps: int) -> str:
         """Spawn a fresh, isolated Apex instance for a focused sub-task.
