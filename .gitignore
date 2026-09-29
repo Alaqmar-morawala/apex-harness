@@ -21,6 +21,7 @@
 !APEX_HARNESS_HANDOFF.md
 !API.md
 !SETUP.md
+!handoff.md
 
 # ── Never track under any circumstance (explicit, even if whitelist changes) ──
 cookies.json

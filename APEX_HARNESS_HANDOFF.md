@@ -1,5 +1,5 @@
 # APEX HARNESS — COMPREHENSIVE ENGINEERING HANDOFF & ARCHITECTURE MANUAL
-**Version:** 1.9.8  
+**Version:** 1.9.9  
 **Date:** 2026-09-29  
 **GitHub Repository:** [https://github.com/Alaqmar-morawala/apex-harness](https://github.com/Alaqmar-morawala/apex-harness) (Public, Branch `main`)  
 **Host Environment:** Linux 7.1.5+kali-amd64 x64 (`Alaqmars-WorkStation`)  
@@ -36,7 +36,7 @@ Apex owns:
 /home/alaqmar/test/
 ├── apex                                # Executable Bash wrapper launcher (readlink-aware, chmod +x)
 ├── apex.cmd                            # Windows batch launcher (auto-picks py or python)
-├── apex_harness.py                     # Single-file core Apex runtime (~2,900 LOC, v1.9.8)
+├── apex_harness.py                     # Single-file core Apex runtime (~3,000 LOC, v1.9.9)
 ├── APEX_HARNESS.md                     # User documentation and CLI reference manual
 ├── APEX_HARNESS_HANDOFF.md             # THIS FILE: Definitive engineering handoff and technical manual
 ├── API.md                              # Reverse-engineered Genspark API reference & protocol spec
@@ -318,7 +318,7 @@ Genspark enforces rolling 5-hour usage windows on accounts. When an account reac
 
 ---
 
-## 9. Complete Bug & Fix Ledger (Bugs #1–#9 + Residuals N1–N4)
+## 9. Complete Bug & Fix Ledger (Bugs #1–#10 + Residuals N1–N4)
 
 This ledger documents the complete set of structural defects diagnosed, repaired, and adversarially verified in Apex:
 
@@ -370,6 +370,15 @@ This ledger documents the complete set of structural defects diagnosed, repaired
   - `_read_preserved()` detects CRLF and preserves line endings upon write.
   - `_atomic_write()` writes to sibling `.tmp` file and atomically commits via `os.replace`.
   - `project_owner` pins threads to the creating account; account rotation raises `ThreadResetByFailover` to trigger a clean full-context re-anchor.
+
+### Bug #10: Placeholder Nudge Induced Junk Loops (v1.9.9)
+- **Symptom**: On a real Godot feature task the model finished the work and returned a summary with no tool call; the harness re-prompted demanding `pwd && ls`, the model obeyed, and ~10 of 30 steps were burned re-listing an unchanged directory until the step limit. A second, subtler form: the demanded body used an unbounded `[^\n]{0,60}` tail, so `run pytest -q and report` became `pytest -q and report` — an invalid command the model would dutifully attempt.
+- **Root Cause**: The v1.9.6 once-per-step nudge assumed a no-tool reply meant laziness, and its body was a hardcoded placeholder. In reality, a no-tool reply *after* real tool work is a completion, and an invented command is worse than no command.
+- **Fix**:
+  - `_nudge_body_for()` derives the command from the task text: explicit path/shell invocation first (`./validate.sh --gpu`), else known tool + at most ONE known subcommand + flags — **never trailing prose**. `pwd && ls` is used only when the task names no command at all.
+  - `_nudge_allowed()` (extracted to be testable) refuses on three independent grounds: no candidate tool, placeholder body after real tool work (`_tools_executed > 0`), or budget spent (`MAX_NUDGES_PER_TASK = 2`, `_nudges_used`, reset per task in `_run_loop`).
+  - Greeting/refusal/upstream guards stay at the call site — they describe the *reply*, `_nudge_allowed` describes the *nudge*.
+  - 14 new checks in the adversarial suite (90 → 104); unit 26/26, Windows shell 18/18.
 
 ### Residuals N1–N4:
 - **N1**: Routed `edit_error` directly through `_exec`; blocked empty `old_string` from faking success on empty files.
@@ -461,7 +470,7 @@ python3 /tmp/apex_unit_tests.py
 # Run Windows shell machinery test suite (18 tests):
 python3 /tmp/apex_win_tests.py
 
-# Run adversarial bug verification suite (34 tests):
+# Run adversarial bug verification suite (104 tests):
 python3 /tmp/apex_review_tests.py
 
 # Run live end-to-end smoke test:

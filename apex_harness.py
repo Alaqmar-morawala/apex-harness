@@ -2246,14 +2246,9 @@ class AgentEngine:
                     break
                 nudge_tool = self._nudge_tool_for(user_input, last_tc)
                 nudge_body = self._nudge_body_for(nudge_tool, user_input) if nudge_tool else ""
-                # Once real tool work has happened, a generic placeholder nudge is
-                # worse than nothing: the model obeys, re-lists the same directory,
-                # and the task never advances. Accept the reply as the final answer.
-                placeholder = (nudge_tool == "bash" and nudge_body == "pwd && ls"
-                               and self._tools_executed > 0)
-                if (nudge_tool and not placeholder and not _is_vague_greeting(user_input)
-                        and not _refusal_hit(text) and not _upstream_declined(text)
-                        and self._nudges_used < MAX_NUDGES_PER_TASK):
+                if (self._nudge_allowed(nudge_tool, nudge_body)
+                        and not _is_vague_greeting(user_input)
+                        and not _refusal_hit(text) and not _upstream_declined(text)):
                     self._nudges_used += 1
                     print(C.s(f"\n  [no tool call — nudging for {nudge_tool} "
                               f"({self._nudges_used}/{MAX_NUDGES_PER_TASK})...]", C.YELLOW))
@@ -2388,6 +2383,25 @@ class AgentEngine:
         self.client.reset_thread()
         return True
 
+    def _nudge_allowed(self, nudge_tool: Optional[str], nudge_body: str) -> bool:
+        """May the no-tool nudge fire right now? Extracted so it can be tested.
+
+        Three independent reasons to refuse (v1.9.9):
+        - no candidate tool at all;
+        - a *placeholder* body after real tool work — the model would obey and
+          re-list an unchanged directory instead of finishing (observed: ~10 of
+          30 steps burned on the Godot timer task);
+        - the per-task nudge budget is spent (a no-tool reply after real work is
+          usually a completion, not a refusal).
+        Greeting/refusal/upstream guards live at the call site — they are about
+        the *reply*, this is about the *nudge*.
+        """
+        if not nudge_tool:
+            return False
+        if nudge_tool == "bash" and nudge_body == "pwd && ls" and self._tools_executed > 0:
+            return False
+        return self._nudges_used < MAX_NUDGES_PER_TASK
+
     def _nudge_tool_for(self, user_input: str, last_tc) -> Optional[str]:
         """Which tool to demand when a step comes back with no tool call."""
         t = (user_input or "").lower()
@@ -2420,21 +2434,35 @@ class AgentEngine:
 
     @staticmethod
     def _nudge_body_for(tool: str, user_input: str) -> str:
-        """Command to demand for a bash nudge - taken from the task when possible.
+        """Command to demand for a bash nudge - derived from the task, never invented.
 
         The old hardcoded `pwd && ls` was a placeholder: a model that had already
         finished its work obeyed it and burned steps re-listing the same folder.
-        Prefer a command the task actually named (e.g. `./validate.sh --gpu`).
+        Two rules, in order:
+          1. an explicit path/command in the task (`./validate.sh --gpu`);
+          2. a tool named in the task, plus at most ONE known subcommand and its
+             flags. Never trailing prose - the naive `[^\n]{0,60}` tail turned
+             "run pytest -q and report" into `pytest -q and report`, an invalid
+             command the model would dutifully try to run.
+        Falls back to `pwd && ls` only when the task names no command at all.
         """
         if tool != "bash":
             return ""
         t = user_input or ""
-        m = re.search(r"(?:\./[\w./-]+|bash\s+[\w./-]+|sh\s+[\w./-]+)(?:\s+--[\w-]+)*", t)
+        # 1) explicit path or shell invocation, with optional flags/values
+        m = re.search(
+            r"(?:\./[\w./-]+|\bbash\s+[\w./-]+|\bsh\s+[\w./-]+)"
+            r"(?:\s+-{1,2}[\w./-]+(?:\s+\d+)?)?", t)
         if m:
             return m.group(0).strip()
-        m = re.search(
-            r"\b(?:godot|validate\.sh|make|cmake|cargo\s+\w+|npm\s+\w+|pytest|git\s+\w+)"
-            r"[^\n]{0,60}", t)
+        # 2) known tool -> optional known subcommand -> flags (all bounded)
+        tools = (r"godot|validate\.sh|make|cmake|cargo|npm|pytest|git|node|"
+                 r"python3|python|gcc|java|mvn|gradle|dotnet|docker")
+        subs = (r"build|test|check|run|install|add|fmt|clippy|new|generate|export|"
+                r"init|push|pull|commit|status|log|diff|clone|fetch|branch|checkout|"
+                r"restore|import|lint|format|start|serve|preview|clean|release|debug")
+        m = re.search(r"\b(?:" + tools + r")(?:\s+(?:" + subs + r"))?"
+                      r"(?:\s+-{1,2}[\w./-]+)*", t)
         if m:
             return m.group(0).strip()
         return "pwd && ls"
