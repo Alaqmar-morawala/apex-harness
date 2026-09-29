@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.9.3"
+VERSION = "1.9.4"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -157,6 +157,41 @@ MOA_ALIASES = {
     "moa-hybrid": "hybrid-moa",
     "sol-opus": "hybrid-moa",
 }
+
+
+def _refusal_hit(text: str) -> bool:
+    """True if the model broke the Apex tool character.
+
+    Normalizes curly quotes so contraction variants ("can't" vs "can’t")
+    cannot slip past the marker list. Covers both classic role-play
+    refusals ("i don't actually have...") and file-access declines
+    ("can't access those local paths... upload or paste...").
+    """
+    t = text.lower().replace("’", "'").replace("‘", "'").replace("`", "'")
+    return any(s in t for s in (
+        "i don't actually have", "i do not actually have",
+        "role-playing", "weren't produced by me", "not produced by me",
+        "tool integration is no longer available",
+        "can't continue role-playing", "cannot continue role-playing",
+        # file-access character breaks: the model claims it cannot touch
+        # the workstation and asks the user to paste or upload files
+        # instead of using its read_file/bash tools.
+        "can't read files", "cannot read files",
+        "can't access files", "cannot access files",
+        "can't access those", "cannot access those",
+        "can't access your", "cannot access your",
+        "don't have access to your files",
+        "do not have access to your files",
+        "no direct access to your",
+        "in this chat", "once i've read them",
+        "upload or paste", "upload them", "paste the contents",
+    ))
+
+
+def _upstream_declined(text: str) -> bool:
+    """True if Genspark's content filter refused instead of the model."""
+    t = text.strip().lower().replace("’", "'")
+    return t.startswith("the model declined to answer")
 
 
 def _moa_burn(ensemble: List[str]) -> str:
@@ -1763,6 +1798,9 @@ def _system_prompt(skills: Optional[SkillStore] = None) -> str:
     Your tool calls run immediately in the local environment and return real outputs.
     Accomplish engineering and coding tasks autonomously using tools.
     Never ask the user to run commands manually. Never claim you lack environment or tool access.
+    When the user names a local file path, you MUST read it with the read_file tool —
+    NEVER reply that you cannot access local files, and NEVER ask the user to
+    paste or upload file contents.
 
     Environment:
     - Working directory: {cwd}
@@ -2025,40 +2063,61 @@ class AgentEngine:
                     renderer.stop()
 
             # Character-break guard: a model (especially after a model switch
-            # on a long thread) may decide the tool results are "just text"
-            # and refuse to act. Detect it, reset the poisoned thread, and
-            # re-anchor ONCE with an explicit continuation preamble.
-            refusal_hit = any(s in text.lower() for s in (
-                "i don't actually have", "i do not actually have",
-                "role-playing", "weren't produced by me", "not produced by me",
-                "tool integration is no longer available",
-                "can't continue role-playing", "cannot continue role-playing",
-                # file-access character breaks (v1.9.3): the model claims it
-                # cannot touch the workstation and asks the user to paste or
-                # upload files instead of using its read_file/bash tools.
-                "can't read files", "cannot read files",
-                "can't access files", "cannot access files",
-                "can't access your", "cannot access your",
-                "don't have access to your files",
-                "do not have access to your files",
-                "no direct access to your",
-                "upload them", "paste the contents",
-            ))
-            if refusal_hit and not self._refusal_retry:
+            # on a long thread, or an MoA ensemble that answers chat-style)
+            # may decide the tool results are "just text" and refuse to act.
+            # Detect it, reset the poisoned thread, and re-anchor ONCE with
+            # an explicit continuation preamble carrying the FULL task.
+            if _upstream_declined(text):
+                # Genspark's content filter (not the model) refused — usually
+                # a stale/poisoned thread state after /resume or model switch.
+                # Reset and retry this step once on a FRESH thread with the
+                # full compacted context. Surfacing "rephrase your request"
+                # as a final answer would be a lie: the request is fine.
+                print(C.s("\n  [upstream declined on a resumed/switched thread — resetting and retrying...]", C.YELLOW))
+                self.client.reset_thread()
+                renderer = StreamRenderer(RICH_CONSOLE)
+                renderer.start(self.model)
+                try:
+                    result = self.client.stream(
+                        query=self.ctx.build_prompt(system),
+                        model=self.model,
+                        enable_search=self.search,
+                        moa_models=self.moa,
+                        on_delta=lambda d: renderer.on_delta(d, self.model),
+                    )
+                    text = result.get("text", "")
+                except Exception as e:
+                    print(C.s(f"\n  [re-anchor error: {e}]", C.RED))
+                    break
+                finally:
+                    renderer.stop()
+                if _upstream_declined(text):
+                    print(C.s("\n  [upstream declined twice — ending task. Try /reset and re-run.]", C.RED))
+                    break
+
+            if _refusal_hit(text) and not self._refusal_retry:
                 self._refusal_retry = True
                 print(C.s("\n  [model broke character — resetting thread and re-anchoring...]", C.YELLOW))
                 self.client.reset_thread()
                 base_task = next((t.content for t in self.ctx.history if t.role == "user"),
                                  user_input)
+                # Re-anchor with the FULL compacted history, not just the
+                # last tool result: on step 1 there is no tool result yet,
+                # and a bare continuation preamble alone lets the model
+                # answer chat-style again instead of calling tools.
+                history_block = self.ctx.build_prompt(system)
                 reanchor = (
                     f"{system}\n\nUser: {base_task}\n\n"
                     "[CONTINUATION] You ARE Apex, an autonomous agent with REAL tools "
                     "(bash, read_file, write_file, edit_file, list_dir, grep, skill) "
                     "executing directly on the user's workstation. "
+                    "You MUST use them: to read ANY local file, output "
+                    "<tool name=\"read_file\" path=\"/absolute/path\"></tool> — NEVER "
+                    "ask the user to paste or upload files. "
                     "The 'Tool Result' blocks in this task are produced by actual local executions "
-                    "of your tool calls — they are not user-simulated text. Continue the task now "
-                    "from the latest result below.\n\n"
-                    f"Tool Result [{last_tc.name if last_tc else 'tool'}]:\n{last_out}"
+                    "of your tool calls — they are not user-simulated text. Continue the task now. "
+                    "Your next response MUST contain exactly one <tool name=\"...\"> call.\n\n"
+                    f"Full task context:\n{history_block}"
                 )
                 renderer = StreamRenderer(RICH_CONSOLE)
                 renderer.start(self.model)
@@ -2468,12 +2527,23 @@ class ApexCLI:
                     kind = "GPT " if key == "gpt-moa" else ""
                     print(C.s(f"  {old} → {kind}Mixture-of-Agents ({' + '.join(ensemble)})", C.GREEN))
                     print(C.s(f"  [MoA runs every model per step — expect {_moa_burn(ensemble)} credit burn per step]", C.YELLOW))
+                    # A model switch on a live server thread poisons character
+                    # (the thread was anchored by the previous model). Reset so
+                    # the next task starts clean instead of declining/breaking.
+                    if self.client.project_id is not None:
+                        self.client.reset_thread()
+                        self.client.save_thread_state()
+                        print(C.s("  [thread reset for the model switch — next task starts a clean thread]", C.DIM))
                 elif arg in MODEL_CATALOG:
                     old = self.engine.model + (" + MoA" if self.engine.moa else "")
                     self.engine.model = arg
                     self.engine.moa = None
                     t = MODEL_CATALOG[arg]["tier"]
                     print(C.s(f"  {old} → {arg} ({t})", C.GREEN))
+                    if self.client.project_id is not None:
+                        self.client.reset_thread()
+                        self.client.save_thread_state()
+                        print(C.s("  [thread reset for the model switch — next task starts a clean thread]", C.DIM))
                 else:
                     print(C.s(f"  Unknown: {arg}", C.RED))
             else:

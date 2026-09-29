@@ -1,5 +1,5 @@
 # APEX HARNESS — COMPREHENSIVE ENGINEERING HANDOFF & ARCHITECTURE MANUAL
-**Version:** 1.9.3  
+**Version:** 1.9.4  
 **Date:** 2026-09-29  
 **GitHub Repository:** [https://github.com/Alaqmar-morawala/apex-harness](https://github.com/Alaqmar-morawala/apex-harness) (Public, Branch `main`)  
 **Host Environment:** Linux 7.1.5+kali-amd64 x64 (`Alaqmars-WorkStation`)  
@@ -36,7 +36,7 @@ Apex owns:
 /home/alaqmar/test/
 ├── apex                                # Executable Bash wrapper launcher (readlink-aware, chmod +x)
 ├── apex.cmd                            # Windows batch launcher (auto-picks py or python)
-├── apex_harness.py                     # Single-file core Apex runtime (~2,000 LOC, v1.9.2)
+├── apex_harness.py                     # Single-file core Apex runtime (~2,700 LOC, v1.9.4)
 ├── APEX_HARNESS.md                     # User documentation and CLI reference manual
 ├── APEX_HARNESS_HANDOFF.md             # THIS FILE: Definitive engineering handoff and technical manual
 ├── API.md                              # Reverse-engineered Genspark API reference & protocol spec
