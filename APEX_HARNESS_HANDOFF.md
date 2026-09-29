@@ -36,7 +36,7 @@ Apex owns:
 /home/alaqmar/test/
 ├── apex                                # Executable Bash wrapper launcher (readlink-aware, chmod +x)
 ├── apex.cmd                            # Windows batch launcher (auto-picks py or python)
-├── apex_harness.py                     # Single-file core Apex runtime (~3,000 LOC, v1.9.9)
+├── apex_harness.py                     # Single-file core Apex runtime (~3,000 LOC, v1.9.10)
 ├── APEX_HARNESS.md                     # User documentation and CLI reference manual
 ├── APEX_HARNESS_HANDOFF.md             # THIS FILE: Definitive engineering handoff and technical manual
 ├── API.md                              # Reverse-engineered Genspark API reference & protocol spec
@@ -318,7 +318,7 @@ Genspark enforces rolling 5-hour usage windows on accounts. When an account reac
 
 ---
 
-## 9. Complete Bug & Fix Ledger (Bugs #1–#10 + Residuals N1–N4)
+## 9. Complete Bug & Fix Ledger (Bugs #1–#13 + Residuals N1–N4)
 
 This ledger documents the complete set of structural defects diagnosed, repaired, and adversarially verified in Apex:
 
@@ -379,6 +379,22 @@ This ledger documents the complete set of structural defects diagnosed, repaired
   - `_nudge_allowed()` (extracted to be testable) refuses on three independent grounds: no candidate tool, placeholder body after real tool work (`_tools_executed > 0`), or budget spent (`MAX_NUDGES_PER_TASK = 2`, `_nudges_used`, reset per task in `_run_loop`).
   - Greeting/refusal/upstream guards stay at the call site — they describe the *reply*, `_nudge_allowed` describes the *nudge*.
   - 14 new checks in the adversarial suite (90 → 104); unit 26/26, Windows shell 18/18.
+
+### Bug #11: Fatal Upstream Errors Exited 0 (v1.9.10)
+- **Symptom**: On the live double-jump run (attempt 1) the task died at step 19/50 with `[upstream error: ConnectionResetError(104, 'Connection reset by peer')]` after the account-pool failover exhausted retries — and the process still exited **0**. Anything driving `-q` (CI, orchestrators, the very subagent pattern used here) cannot tell success from death.
+- **Root Cause**: Every fatal path in the run loop ends in a plain `break` — post-failover retry death, generic stream exception, both re-anchor errors, and the declined-twice abort. The task then ends "normally" and `main()` falls through with exit 0.
+- **Fix**: `AgentEngine.task_failed` (Optional[str], reset per task in `_run_loop`) is set at all five fatal break sites; the `ApexCLI.run` `-q` branch calls `sys.exit(1)` when it is set. REPL behavior unchanged.
+
+### Bug #12: edit_file Substring Splice Doubled Indentation (v1.9.10)
+- **Symptom**: Same live run, step 9/10: the tool's own result diff showed `-status_label.modulate = Color(...)` / `+\tstatus_label.modulate = Color(...)` — old_string parsed **flush** while new_string carried the file's tab. The written line was double-indented (GDScript Parse Error; the gate caught it, costing the agent extra steps).
+- **Root Cause**: `str.replace` matches anywhere. A flush `old_string` — the model quotes a line's content without its leading indent, which is common — still matches *inside* the indented file line, and the splice leaves the file line's own leading whitespace glued to the front of the replacement's first line.
+- **Fix**: `_anchor_line_start()` (static, unit-testable): when the text before the match is pure indentation **and** `old_string`'s first line is flush, re-anchor the match at the line start and carry that indent onto every *flush* line of the replacement; lines that already carry whitespace keep their own. A match preceded by real content (a genuine inline edit like `f(x = 1)`) keeps plain substring semantics. The anchored pair is unique whenever `old_string` is — it is a superstring of a match the caller already verified occurs exactly once.
+- Tests: #12a–#12d (doubled indent, indent loss on a flush replacement, inline untouched, line-start untouched).
+
+### Bug #13: File Rewrites Dropped the Executable Bit (v1.9.10)
+- **Symptom**: The live agent's edit set `validate.sh` from 100755 → 100644 — in **both** live attempts. Attempt 1 never noticed (its own gate run was killed by the network); attempt 2 self-diagnosed via `git diff --summary` + `chmod`, costing a step.
+- **Root Cause**: `_atomic_write` writes a fresh sibling tmp (0644 by umask) and commits with `os.replace` — the target's permission bits never transfer to the tmp.
+- **Fix**: `_atomic_write` now `os.chmod`s the tmp to the existing target's `st_mode & 0o7777` before replace (new files keep umask defaults).
 
 ### Residuals N1–N4:
 - **N1**: Routed `edit_error` directly through `_exec`; blocked empty `old_string` from faking success on empty files.

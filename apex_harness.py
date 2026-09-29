@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.9.9"
+VERSION = "1.9.10"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -1217,12 +1217,19 @@ class ToolRegistry:
 
     def _atomic_write(self, p: Path, text_lf: str, crlf: bool):
         """Write via temp file + os.replace so a crash can never leave a
-        half-written file (#9)."""
+        half-written file (#9). The temp file carries the target's permission
+        bits (#13): a fresh tmp is 0644-by-umask, and os.replace would silently
+        strip the executable bit (validate.sh went 100755→100644 live)."""
         out = text_lf.replace("\n", "\r\n") if crlf else text_lf
         tmp = p.parent / f".{p.name}.apex-{uuid.uuid4().hex[:8]}.tmp"
         try:
             with open(tmp, "w", encoding="utf-8", newline="") as f:
                 f.write(out)
+            if p.exists():
+                try:
+                    os.chmod(tmp, p.stat().st_mode & 0o7777)
+                except OSError:
+                    pass
             os.replace(tmp, p)
         finally:
             if tmp.exists():
@@ -1289,6 +1296,42 @@ class ToolRegistry:
         except Exception as e:
             return f"[error] write {path}: {e}"
 
+    @staticmethod
+    def _anchor_line_start(text: str, old_string: str, new_string: str) -> Tuple[str, str]:
+        """Re-anchor a mid-line match at its line start when the text before it
+        is pure indentation (#12).
+
+        A flush first line still matches INSIDE an indented file line, and a
+        plain substring replace then splices the replacement after the file's
+        own indent — doubling it (observed live on the double-jump run:
+        '-status_label.modulate' became '+\\t\\tstatus_label.modulate'). The
+        model almost always means the whole line, so the leftover indent is
+        consumed into the match and the replacement lands exactly as written.
+        When the replacement's first line is flush too, the consumed indent is
+        carried over so a line never loses its indentation either. A match
+        preceded by real content (an inline edit like `f(x = 1)`) is left to
+        plain substring semantics. The anchored pair is unique whenever
+        old_string is: it is a superstring of a string the caller already
+        verified occurs exactly once."""
+        idx = text.find(old_string)
+        if idx <= 0 or not old_string:
+            return old_string, new_string
+        line_start = text.rfind("\n", 0, idx) + 1
+        prefix = text[line_start:idx]
+        # Anchor only when the leftover is pure indentation AND the model wrote
+        # the first line flush (i.e. it omitted the line's indent). Anything
+        # else is a genuine inline edit — keep plain substring semantics.
+        if not prefix or prefix.strip() or old_string[0].isspace():
+            return old_string, new_string
+        # The model omitted indentation it could not have matched with: carry
+        # the file's indent onto every FLUSH line of the replacement so no line
+        # loses it, while lines that already carry whitespace keep their own.
+        new_string = "\n".join(
+            (prefix + ln) if (ln and not ln[0].isspace()) else ln
+            for ln in new_string.split("\n")
+        )
+        return prefix + old_string, new_string
+
     def edit_file(self, path: str, old_string: str, new_string: str) -> str:
         p = self._resolve(path)
         if not p.exists():
@@ -1307,6 +1350,7 @@ class ToolRegistry:
             if count > 1:
                 return f"[error] old_string matches {count} places in {path}. Be more specific."
             self.snaps.save(str(p), "edit")
+            old_string, new_string = self._anchor_line_start(text, old_string, new_string)
             new_text = text.replace(old_string, new_string, 1)
             self._atomic_write(p, new_text, crlf)
             diff = "\n".join(difflib.unified_diff(
@@ -1966,6 +2010,9 @@ class AgentEngine:
         self._stop = False
         self._nudges_used = 0
         self._tools_executed = 0
+        # Set when a task dies on an unrecoverable upstream error (#11) so a
+        # `-q` caller can exit non-zero instead of mistaking death for success.
+        self.task_failed: Optional[str] = None
 
     def run(self, user_input: str) -> str:
         try:
@@ -1988,6 +2035,7 @@ class AgentEngine:
         self._refusal_retry = False
         self._nudges_used = 0
         self._tools_executed = 0
+        self.task_failed = None
         self.ctx.add("user", user_input)
         system = _system_prompt(self.skills)
 
@@ -2045,12 +2093,14 @@ class AgentEngine:
                     )
                 except Exception as e2:
                     print(C.s(f"\n  [upstream error after failover: {e2}]", C.RED))
+                    self.task_failed = str(e2)
                     self.ctx.add("tool_result", f"[upstream error: {e2}]", tool_name="error", step=step)
                     break
             except Exception as e:
                 renderer.stop()
                 msg = f"[upstream error: {e}]"
                 print(C.s(f"\n  {msg}", C.RED))
+                self.task_failed = str(e)
                 self.ctx.add("tool_result", msg, tool_name="error", step=step)
                 break
             finally:
@@ -2150,6 +2200,7 @@ class AgentEngine:
                     text = result.get("text", "")
                 except Exception as e:
                     print(C.s(f"\n  [re-anchor error: {e}]", C.RED))
+                    self.task_failed = str(e)
                     break
                 finally:
                     renderer.stop()
@@ -2160,6 +2211,7 @@ class AgentEngine:
                     if self._try_opus_fallback(system, user_input):
                         continue
                     print(C.s("\n  [upstream declined twice — ending task. Try /reset and re-run.]", C.RED))
+                    self.task_failed = "upstream declined twice"
                     break
 
             if _refusal_hit(text) and not self._refusal_retry:
@@ -2212,6 +2264,7 @@ class AgentEngine:
                     text = result.get("text", "")
                 except Exception as e:
                     print(C.s(f"\n  [re-anchor error: {e}]", C.RED))
+                    self.task_failed = str(e)
                     break
                 finally:
                     renderer.stop()
@@ -2767,6 +2820,9 @@ class ApexCLI:
 
         if self.query:
             self.engine.run(self.query)
+            if self.engine.task_failed:
+                # Fatal upstream death must not look like success (#11)
+                sys.exit(1)
             return
 
         while True:

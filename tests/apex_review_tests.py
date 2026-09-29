@@ -386,6 +386,95 @@ check("budget exhausted refuses task-derived nudge too",
       not eng9._nudge_allowed("bash", "./validate.sh"))
 check("no candidate tool refused", not eng9._nudge_allowed(None, ""))
 
+# ============================================================
+# v1.9.10 — defects observed live on the double-jump harness run
+# (handoff.md §9.7 + §14; ledger #11, #12, #13)
+# ============================================================
+
+print("#12a edit_file: flush old_string inside an indented line must not double the indent")
+shellv = ah.PersistentShell()
+toolsv = ToolRegistry(shellv, FileSnapshot())
+_gd = "/tmp/apex_rv_anchor.gd"
+Path(_gd).write_text("func _build():\n\tstatus_label.modulate = Color(1, 1, 1)\n\tadd_child(layer)\n")
+toolsv.edit_file(_gd, "status_label.modulate = Color(1, 1, 1)",
+                 "\tstatus_label.modulate = Color(2, 2, 2)\n\tair_jump_label = Label.new()")
+got = Path(_gd).read_text()
+check("no doubled indent on the replaced line", "\t\tstatus_label.modulate" not in got, repr(got))
+check("replacement lands with model-supplied indent", "\tstatus_label.modulate = Color(2, 2, 2)" in got, repr(got))
+check("added line written with its indent", "\tair_jump_label = Label.new()" in got, repr(got))
+
+print("#12b edit_file: flush replacement keeps the matched line's indentation")
+Path(_gd).write_text("func _build():\n\tadd_child(layer)\n")
+toolsv.edit_file(_gd, "add_child(layer)", "add_child(front)\nadd_child(back)")
+got = Path(_gd).read_text()
+check("indent carried over, not lost", "\tadd_child(front)\n\tadd_child(back)" in got, repr(got))
+
+print("#12c edit_file: genuine inline (non-indent) mid-line match still splices in place")
+Path(_gd).write_text("total = f(x = 1, y = 2)\n")
+toolsv.edit_file(_gd, "x = 1", "x = 9")
+got = Path(_gd).read_text()
+check("inline substring edit untouched", got == "total = f(x = 9, y = 2)\n", repr(got))
+
+print("#12d edit_file: match already at line start keeps exact semantics")
+Path(_gd).write_text("\tfoo = 1\n\tbar = 2\n")
+toolsv.edit_file(_gd, "\tfoo = 1", "\tfoo = 11")
+got = Path(_gd).read_text()
+check("line-start match replaced verbatim", got == "\tfoo = 11\n\tbar = 2\n", repr(got))
+
+print("#13a file rewrites keep the executable bit (validate.sh went 100755→100644 live)")
+_sh = "/tmp/apex_rv_exec.sh"
+Path(_sh).write_text("#!/bin/bash\necho hi\n")
+os.chmod(_sh, 0o755)
+toolsv.edit_file(_sh, "echo hi", "echo bye")
+check("edit_file preserves mode", os.stat(_sh).st_mode & 0o111 != 0, oct(os.stat(_sh).st_mode))
+toolsv.write_file(_sh, "#!/bin/bash\necho rewritten\n")
+check("write_file preserves mode", os.stat(_sh).st_mode & 0o111 != 0, oct(os.stat(_sh).st_mode))
+shellv.close()
+
+print("#11 fatal upstream errors surface to the caller (was: exit 0 on ConnectionReset)")
+class _DeadStreamClient:
+    project_id = None
+    def stream(self, **kw):
+        raise ConnectionResetError(104, "Connection reset by peer")
+
+eng10 = ah.AgentEngine(client=_DeadStreamClient(), tools=None, context=ah.ContextManager(), skills=None)
+eng10.run("do a thing")
+check("task_failed set when the pool dies",
+      "Connection reset" in str(getattr(eng10, "task_failed", None)),
+      repr(getattr(eng10, "task_failed", None)))
+
+class _BoomStreamClient:
+    project_id = None
+    def stream(self, **kw):
+        raise RuntimeError("boom-2")
+
+eng10.task_failed = "stale-sentinel"
+eng10.client = _BoomStreamClient()
+eng10.run("second task")
+check("task_failed reset at task start",
+      str(getattr(eng10, "task_failed", None)) == "boom-2",
+      repr(getattr(eng10, "task_failed", None)))
+
+from types import SimpleNamespace
+_cli = ah.ApexCLI.__new__(ah.ApexCLI)
+_cli.engine = SimpleNamespace(run=lambda q: None, task_failed="boom", model="m", max_steps=1)
+_cli.client = SimpleNamespace(pool=SimpleNamespace(accounts=[SimpleNamespace(tag="t")]))
+_cli.query = "task"
+try:
+    _cli.run()
+    check("-q exits non-zero on task_failed", False, "no SystemExit raised")
+except SystemExit as e:
+    check("-q exits non-zero on task_failed", e.code == 1, f"code={e.code}")
+_cli2 = ah.ApexCLI.__new__(ah.ApexCLI)
+_cli2.engine = SimpleNamespace(run=lambda q: None, task_failed=None, model="m", max_steps=1)
+_cli2.client = _cli.client
+_cli2.query = "task"
+try:
+    _cli2.run()
+    check("-q clean task exits 0 path (no SystemExit)", True)
+except SystemExit as e:
+    check("-q clean task exits 0 path (no SystemExit)", False, f"unexpected exit {e.code}")
+
 print()
 print()
 print(f"RESULTS: {PASS} passed, {FAIL} failed")

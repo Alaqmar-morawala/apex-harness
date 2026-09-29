@@ -1,6 +1,6 @@
 # HANDOFF — Godot 4 vertical slice + apex harness
 
-**Session:** 2026-09-29 · **Author:** Cline · **apex:** 1.9.9 · **Godot:** 4.7.2.stable.official.ed1daf0bf
+**Session:** 2026-09-29 · **Author:** Cline · **apex:** 1.9.10 · **Godot:** 4.7.2.stable.official.ed1daf0bf
 **Resumed:** 2026-09-29 PM (ZCode, two-subagent session) — see §14 for what that changed.
 
 **Purpose:** everything needed to resume without redoing discovery. Read in order:
@@ -14,7 +14,7 @@ this file → `~/games/ApexGame/.apex/skills/godot-4.md` (project skill, auto-di
 cd ~/games/ApexGame && ./validate.sh            # must print PASS
 cd ~/games/ApexGame && ./validate.sh --scenarios # TIME_UP x2, ROUND_RESET x1
 cd ~/games/ApexGame && ./validate.sh --shot       # pixel gate (flashes a real window)
-python3 ~/test/apex_harness.py --version          # apex 1.9.9
+python3 ~/test/apex_harness.py --version          # apex 1.9.10
 git -C ~/test status -sb                          # → "## main" only = clean & synced to origin
 ```
 
@@ -37,8 +37,9 @@ If any of these fail, read §8 (gotchas) and §9 (open work) **before** editing 
 - `validate.sh` is the gate: 6 stages (plus the agent-added `[double-jump]` scenario), all green as of 19:49.
 - **`~/games/ApexGame` is now a git repo** (branch `main`, local only, no remote): `17e8c90` initial,
   `44a8185` double-jump via live harness run, `9019c84` Windows/macOS export presets.
-- apex harness **v1.9.9 committed and pushed**; the nudge fix is now **proven live** (exactly 2
-  task-derived nudges, zero placeholder-loop steps — see §14).
+- apex harness **v1.9.10 committed and pushed** (v1.9.9's nudge fix **proven live** — exactly 2
+  task-derived nudges, zero placeholder-loop steps, §14; v1.9.10 fixes the three defects that
+  live run exposed — ledger #11–#13, §9.7).
 - The three regression suites are **versioned at `~/test/tests/`** (no longer /tmp-only).
 - All three desktop exports exist and are structurally verified: Linux ELF (gate-exported),
   Windows PE32+ (104M), macOS ad-hoc-signed universal `.app` zip (60M). Only Linux has been *run*.
@@ -242,15 +243,20 @@ after tool work, task-derived still allowed, budget exhausted, no tool).
 |---|---|---|
 | unit | `python3 ~/test/tests/apex_unit_tests.py` | 26/26 |
 | Windows shell machinery | `python3 ~/test/tests/apex_win_tests.py` | 18/18 |
-| adversarial / bug-verification | `python3 ~/test/tests/apex_review_tests.py` | **104/104** (was 90; +14 for v1.9.9) |
+| adversarial / bug-verification | `python3 ~/test/tests/apex_review_tests.py` | **116/116** (was 104; +12 for v1.9.10) |
 
 > ✅ **These are versioned in the repo at `~/test/tests/`** — `.gitignore` allowlists `tests/`,
 > and they were moved out of `/tmp` and committed on 2026-09-29, so reboots no longer wipe them.
 > See §9.5 for the remaining live-run half of that item.
 
-**Docs kept in sync with the code:** `APEX_HARNESS_HANDOFF.md` (header now v1.9.9, ledger
-heading `Bugs #1–#10`, new **Bug #10** entry, suite counts), `README.md` status line, and
+**Docs kept in sync with the code:** `APEX_HARNESS_HANDOFF.md` (header now v1.9.10, ledger
+heading `Bugs #1–#13` with the three v1.9.10 entries, suite counts), `README.md` status line, and
 `.gitignore` gained `!handoff.md` so *this file* is no longer swallowed by the ignore rule.
+
+**v1.9.10 — the three defects the live run exposed, fixed same-day (see §9.7 + §14).**
+RED-first: 7 new failing checks reproduced each defect from the preserved run logs, then:
+`AgentEngine.task_failed` (+ `-q` exits 1), `_anchor_line_start()` (line-start re-anchoring for
+`edit_file`), `_atomic_write` mode preservation. Adversarial suite 104 → 116; `VERSION = "1.9.10"`.
 
 ---
 
@@ -302,14 +308,15 @@ heading `Bugs #1–#10`, new **Bug #10** entry, suite counts), `README.md` statu
    live run fired exactly 2 task-derived nudges then accepted the no-tool summary as completion.
 6. ~~**Re-export after any `main.gd` change.**~~ — **DONE 2026-09-29 PM.** `./validate.sh --export`
    PASS; fresh ELF with the double-jump build (73,532,392 B). Standing rule: re-export after edits.
-7. **NEW — harness hardening candidates observed live** (§14 has the evidence):
-   - `apex_harness.py` **exits 0 even on a fatal upstream error** (account-pool failover exhausted,
-     `ConnectionResetError`) — callers/scripts cannot detect the failure.
-   - `edit_file` **prepends the matched line's original indentation** onto the replacement's first
-     line → over-indented GDScript; the gate caught it (Parse Error) but it cost the agent steps.
-   - File rewrites **drop the executable bit** (100755→100644); hit `validate.sh` in *both* runs.
-     Attempt 2 self-diagnosed via `git diff --summary` + `chmod`; attempt 1 never noticed.
-   These are unfixed — diagnose, fix, add tests, bump to v1.9.10, and add ledger entries.
+7. ~~**NEW — harness hardening candidates observed live**~~ — **FIXED in v1.9.10 (2026-09-29 PM)**,
+   ledger entries #11–#13 in `APEX_HARNESS_HANDOFF.md`, +12 adversarial checks (104 → 116):
+   - **Exit code (#11)**: `AgentEngine.task_failed` set at all five fatal break sites, reset per
+     task; `-q` now exits 1 on a dead task instead of 0.
+   - **edit_file indentation (#12)**: a flush `old_string` matching inside an indented file line
+     spliced the replacement after the file's own indent (doubled it). `_anchor_line_start()`
+     re-anchors to the line start when the leftover is pure indentation, carrying it onto every
+     flush replacement line; genuine inline edits keep substring semantics.
+   - **Exec bit (#13)**: `_atomic_write` chmods its tmp to the target's mode before `os.replace`.
 
 ---
 
@@ -343,7 +350,7 @@ heading `Bugs #1–#10`, new **Bug #10** entry, suite counts), `README.md` statu
 
 ```bash
 python3 -m py_compile ~/test/apex_harness.py && python3 ~/test/apex_harness.py --version
-#   → apex 1.9.9
+#   → apex 1.9.10
 git -C ~/test status -sb                    # → clean, in sync with origin/main
 cd ~/games/ApexGame && ./validate.sh        # → PASS
 cd ~/games/ApexGame && ./validate.sh --scenarios   # → TIME_UP x2, ROUND_RESET x1
@@ -443,10 +450,10 @@ repatriation) plus orchestrator work (exports, docs). Verbatim harness logs: `/t
    double-jump build. Full regression after all changes: default gate PASS, scenarios PASS (incl.
    `[double-jump]`), pixel PASS (mean=48.0 std=26.6 colors=104), suites 26/18/104 all green.
 
-**Harness defects observed live** (now §9.7; unfixed, target v1.9.10): exit code 0 on fatal
-upstream error; `edit_file` prepending the matched line's indentation onto the replacement's first
-line; file rewrites dropping the exec bit (hit `validate.sh` in both attempts — attempt 2
-self-diagnosed via `git diff --summary` + `chmod`).
+**Harness defects observed live** (now §9.7; **fixed in v1.9.10 the same day** — ledger #11–#13,
+adversarial suite 104 → 116): exit code 0 on fatal upstream error; `edit_file` prepending the
+matched line's indentation onto the replacement's first line; file rewrites dropping the exec bit
+(hit `validate.sh` in both attempts — attempt 2 self-diagnosed via `git diff --summary` + `chmod`).
 
 *End of handoff.*
 
