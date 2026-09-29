@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.9.5"
+VERSION = "1.9.6"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -1820,6 +1820,11 @@ def _system_prompt(skills: Optional[SkillStore] = None) -> str:
 
     To use a tool, output an XML tag. You may include brief thinking before the tag.
     Call ONE tool per response, then wait for the result.
+    When the user's request needs a tool (listing files, reading files, running
+    commands, searching code), your FIRST response MUST be a tool call — NEVER a
+    chat question like "What would you like me to do?" or a greeting. If there
+    is no tool result yet and the user named a path or asked to look at
+    something, CALL THE TOOL for it immediately.
 
     ### bash — Execute a shell command
     <tool name="bash">
@@ -1866,6 +1871,11 @@ def _system_prompt(skills: Optional[SkillStore] = None) -> str:
 
     ## Rules
     1. ONE tool call per response. Wait for the result before calling the next.
+    1a. FIRST-RESPONSE RULE: if the user asked you to look at / list / read /
+        see / check anything, your first response MUST be the tool call that
+        does it. Chat-only replies ("What would you like me to do?", "Hey!",
+        "I see the listing but...") are FORBIDDEN as a first response to a
+        tool task — they end the task with nothing done.
     2. ALWAYS read a file before editing — never guess at content.
     3. When done, write a clear summary. No tool call in the final answer.
     4. If a command fails, analyze the error and try a different approach.
@@ -2161,6 +2171,46 @@ class AgentEngine:
                 print(C.s(f"\n  [parser error: {e} — treating response as final text]", C.RED))
                 cleaned, calls = text, []
 
+            # No-tool nudge (v1.9.6): models other than opus-5-5 often answer a
+            # tool task with chat ("What would you like me to do?") instead of
+            # a <tool> tag. Probe-verified 2026-09-29 that every catalog model
+            # DOES emit tags when told to — so re-prompt ONCE per step, pointing
+            # at the exact tool the task needs, instead of ending the task.
+            if not calls and step < self.max_steps and not self._stop:
+                nudge_tool = self._nudge_tool_for(user_input, last_tc)
+                if nudge_tool and not _refusal_hit(text) and not _upstream_declined(text):
+                    print(C.s(f"\n  [no tool call — nudging for {nudge_tool}...]", C.YELLOW))
+                    nudge = (
+                        f"That reply had no tool call, so nothing happened. "
+                        f"Emit EXACTLY this tag now, and nothing else: "
+                        f"<tool name=\"{nudge_tool}\""
+                        f"{self._nudge_attrs_for(nudge_tool, user_input, last_tc)}>"
+                        f"{self._nudge_body_for(nudge_tool, user_input)}"
+                        f"</tool>"
+                    )
+                    renderer = StreamRenderer(RICH_CONSOLE)
+                    renderer.start(self.model)
+                    try:
+                        result = self.client.stream(
+                            query=nudge,
+                            model=self.model,
+                            enable_search=self.search,
+                            moa_models=self.moa,
+                            on_delta=lambda d: renderer.on_delta(d, self.model),
+                        )
+                        text = result.get("text", "")
+                    except Exception as e:
+                        print(C.s(f"\n  [nudge error: {e}]", C.RED))
+                        text = ""
+                    finally:
+                        renderer.stop()
+                    if text.strip():
+                        try:
+                            cleaned, calls = ToolParser.parse(text)
+                        except Exception as e:
+                            print(C.s(f"\n  [parser error: {e} — treating response as final text]", C.RED))
+                            cleaned, calls = text, []
+
             self.ctx.add("assistant", text, step=step)
 
             if not calls:
@@ -2244,6 +2294,42 @@ class AgentEngine:
         ))
         self.client.reset_thread()
         return True
+
+    def _nudge_tool_for(self, user_input: str, last_tc) -> Optional[str]:
+        """Which tool to demand when a step comes back with no tool call."""
+        t = (user_input or "").lower()
+        if last_tc is not None:
+            # Mid-task chat instead of the next tool call: keep the chain
+            # going with the same tool family the task was using.
+            return last_tc.name if last_tc.name in ToolParser.NAMES else "bash"
+        if any(w in t for w in ("list", "dir", "directory", "see ", "look", "show", "browse", "folder")):
+            return "list_dir"
+        if any(w in t for w in ("read", "open", "cat ", "file", "handoff", "memory", "context")):
+            return "read_file"
+        if any(w in t for w in ("search", "grep", "find ", "locate", "where")):
+            return "grep"
+        if any(w in t for w in ("run", "exec", "command", "test", "pytest", "build", "install")):
+            return "bash"
+        return "bash"
+
+    @staticmethod
+    def _nudge_attrs_for(tool: str, user_input: str, last_tc) -> str:
+        import re as _re
+        m = _re.search(r"(/[\w\-.~$(){}\[\]: ]{1,180}|[A-Za-z]:\\[^\s\"']{1,180}|\.(?:/[^\s\"']{1,120})?)", user_input or "")
+        path = m.group(1).strip() if m else (".")
+        if tool == "list_dir":
+            return f' path="{path}" depth="1"'
+        if tool == "read_file":
+            return f' path="{path}"'
+        if tool == "grep":
+            return ' pattern="TODO|FIXME" path="."'
+        return ""
+
+    @staticmethod
+    def _nudge_body_for(tool: str, user_input: str) -> str:
+        if tool == "bash":
+            return "pwd && ls"
+        return ""
 
     def _run_subagent(self, prompt: str, model: str, steps: int) -> str:
         """Spawn a fresh, isolated Apex instance for a focused sub-task.
