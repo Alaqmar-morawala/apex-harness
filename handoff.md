@@ -14,7 +14,7 @@ cd ~/games/ApexGame && ./validate.sh            # must print PASS
 cd ~/games/ApexGame && ./validate.sh --scenarios # TIME_UP x2, ROUND_RESET x1
 cd ~/games/ApexGame && ./validate.sh --shot       # pixel gate (flashes a real window)
 python3 ~/test/apex_harness.py --version          # apex 1.9.9
-git -C ~/test status -sb                          # clean, in sync w/ origin/main @ 47ac93e
+git -C ~/test status -sb                          # → "## main" only = clean & synced to origin
 ```
 
 If any of these fail, read §8 (gotchas) and §9 (open work) **before** editing anything.
@@ -212,9 +212,12 @@ until the step limit. A no-tool reply *after* real tool work is a **completion**
 *Verification:* `python3 -m py_compile apex_harness.py` → OK; unit-level check of
 `AgentEngine._nudge_body_for` over 4 task phrasings → all as expected.
 
-**Git:** commit `47ac93e`, **pushed** — `origin/main` moved `12db11d..47ac93e`;
-`git rev-list --left-right --count origin/main...HEAD` → `0 0` (fully synced).
-Prior local commits v1.9.4–v1.9.8 were published by that same push.
+**Git:** everything below is pushed to `origin/main`. Commits this session: `47ac93e`
+(the nudge fix — also published 6 previously-unpushed commits v1.9.4→v1.9.9, moving
+`12db11d..47ac93e`) and `4e9a855` (follow-up: prose-safe derivation, `_nudge_allowed`
+extraction, +14 tests, docs sync, this file), plus a final doc-polish commit.
+**Healthy state = `git status -sb` prints only `## main`** (no ahead/behind, no modified files).
+`git log -1 --oneline` is the current HEAD.
 
 **Second v1.9.9 defect, caught by writing tests for the first one:**
 `_nudge_body_for()` used an unbounded `[^\n]{0,60}` tail, so `"run pytest -q and report"`
