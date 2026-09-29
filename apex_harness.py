@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.9.1"
+VERSION = "1.9.2"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -140,14 +140,20 @@ MOA_DEFAULT = ["gpt-5.1-low", "claude-sonnet-4-6", "gemini-3.1-pro-preview"]
 # per user request (replaces gpt-5.5). Two 30x-tier members: expect ~4x burn.
 # NOTE: gpt-6-sol tier "4x" mirrors the 5.6-sol line — multiplier unverified.
 MOA_GPT = ["gpt-5.5-pro", "gpt-5.4-pro", "gpt-5.6-sol", "gpt-6-sol"]
+# Hybrid ensemble (user-requested 2026-09-29): the two Sol flagships + Opus 4.8
+# — cross-vendor coverage (2x GPT + 1x Claude) at ~13x burn, far under gpt-moa.
+MOA_HYBRID = ["gpt-6-sol", "gpt-5.6-sol", "claude-opus-4-8"]
 MOA_PRESETS = {
     "genspark-moa": MOA_DEFAULT,
     "gpt-moa": MOA_GPT,
+    "hybrid-moa": MOA_HYBRID,
 }
 MOA_ALIASES = {
     "mixture-of-agents": "genspark-moa",
     "genspark-gpt-moa": "gpt-moa",
     "gpt-mixture": "gpt-moa",
+    "moa-hybrid": "hybrid-moa",
+    "sol-opus": "hybrid-moa",
 }
 
 
