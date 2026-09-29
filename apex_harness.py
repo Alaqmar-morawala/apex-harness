@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.9.8"
+VERSION = "1.9.9"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -66,6 +66,14 @@ GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # serve claude-sonnet-4-5. The substitution guard catches any future mismatch.
 DEFAULT_MODEL = "claude-opus-5-5"
 MAX_STEPS_DEFAULT = 30
+# v1.9.9: a reply with no tool call is re-prompted AT MOST this many times per
+# task, and the demanded call must be derived from the task itself. Observed on
+# a real Godot feature task (claude-opus-5-5, 2026-09-29): the model finished
+# the work, then legitimately returned summary text; the nudge demanded the
+# hardcoded placeholder `pwd && ls`, the model obeyed, and ~10 of 30 steps went
+# to re-listing the same directory. A no-tool reply AFTER real tool work is
+# usually a completion, and a placeholder nudge turns it into a junk loop.
+MAX_NUDGES_PER_TASK = 2
 SHELL_TIMEOUT = 120
 OUTPUT_HEAD = 60
 OUTPUT_TAIL = 100
@@ -1956,6 +1964,8 @@ class AgentEngine:
         self._warned_pairs: Set[Tuple[str, str]] = set()
         self._unfinished_retry = False
         self._stop = False
+        self._nudges_used = 0
+        self._tools_executed = 0
 
     def run(self, user_input: str) -> str:
         try:
@@ -1976,6 +1986,8 @@ class AgentEngine:
         self._stop = False
         self._unfinished_retry = False
         self._refusal_retry = False
+        self._nudges_used = 0
+        self._tools_executed = 0
         self.ctx.add("user", user_input)
         system = _system_prompt(self.skills)
 
@@ -2233,15 +2245,24 @@ class AgentEngine:
                     final = cleaned or text
                     break
                 nudge_tool = self._nudge_tool_for(user_input, last_tc)
-                if (nudge_tool and not _is_vague_greeting(user_input)
-                        and not _refusal_hit(text) and not _upstream_declined(text)):
-                    print(C.s(f"\n  [no tool call — nudging for {nudge_tool}...]", C.YELLOW))
+                nudge_body = self._nudge_body_for(nudge_tool, user_input) if nudge_tool else ""
+                # Once real tool work has happened, a generic placeholder nudge is
+                # worse than nothing: the model obeys, re-lists the same directory,
+                # and the task never advances. Accept the reply as the final answer.
+                placeholder = (nudge_tool == "bash" and nudge_body == "pwd && ls"
+                               and self._tools_executed > 0)
+                if (nudge_tool and not placeholder and not _is_vague_greeting(user_input)
+                        and not _refusal_hit(text) and not _upstream_declined(text)
+                        and self._nudges_used < MAX_NUDGES_PER_TASK):
+                    self._nudges_used += 1
+                    print(C.s(f"\n  [no tool call — nudging for {nudge_tool} "
+                              f"({self._nudges_used}/{MAX_NUDGES_PER_TASK})...]", C.YELLOW))
                     nudge = (
                         f"That reply had no tool call, so nothing happened. "
                         f"Emit EXACTLY this tag now, and nothing else: "
                         f"<tool name=\"{nudge_tool}\""
                         f"{self._nudge_attrs_for(nudge_tool, user_input, last_tc)}>"
-                        f"{self._nudge_body_for(nudge_tool, user_input)}"
+                        f"{nudge_body}"
                         f"</tool>"
                     )
                     renderer = StreamRenderer(RICH_CONSOLE)
@@ -2279,6 +2300,8 @@ class AgentEngine:
             tc = calls[0]
             _ui_tool_start(tc)
             output = self._exec(tc)
+            if tc.name != "skill":
+                self._tools_executed += 1
             if len(calls) > 1:
                 ignored = ", ".join(c.name for c in calls[1:])
                 output += (
@@ -2397,9 +2420,24 @@ class AgentEngine:
 
     @staticmethod
     def _nudge_body_for(tool: str, user_input: str) -> str:
-        if tool == "bash":
-            return "pwd && ls"
-        return ""
+        """Command to demand for a bash nudge - taken from the task when possible.
+
+        The old hardcoded `pwd && ls` was a placeholder: a model that had already
+        finished its work obeyed it and burned steps re-listing the same folder.
+        Prefer a command the task actually named (e.g. `./validate.sh --gpu`).
+        """
+        if tool != "bash":
+            return ""
+        t = user_input or ""
+        m = re.search(r"(?:\./[\w./-]+|bash\s+[\w./-]+|sh\s+[\w./-]+)(?:\s+--[\w-]+)*", t)
+        if m:
+            return m.group(0).strip()
+        m = re.search(
+            r"\b(?:godot|validate\.sh|make|cmake|cargo\s+\w+|npm\s+\w+|pytest|git\s+\w+)"
+            r"[^\n]{0,60}", t)
+        if m:
+            return m.group(0).strip()
+        return "pwd && ls"
 
     def _same_as_last_tool(self, tc) -> bool:
         """True if this tool call duplicates the previous step's call."""
