@@ -58,7 +58,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.9.6"
+VERSION = "1.9.7"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -185,6 +185,13 @@ def _refusal_hit(text: str) -> bool:
         "no direct access to your",
         "in this chat", "once i've read them",
         "upload or paste", "upload them", "paste the contents",
+        # explicit tool-disobedience (v1.9.7): the MoA consensus layer
+        # answered the nudge with a principled refusal to emit the tag.
+        "can't execute local commands", "cannot execute local commands",
+        "can't run list_dir", "cannot run list_dir",
+        "can't truthfully emit", "cannot truthfully emit",
+        "emitting the tag as text",
+        "wouldn't list the directory", "would not list the directory",
     ))
 
 
@@ -2125,6 +2132,19 @@ class AgentEngine:
 
             if _refusal_hit(text) and not self._refusal_retry:
                 self._refusal_retry = True
+                # MoA refusal: the consensus layer will not emit tags, so a
+                # re-anchor would burn 13-68x credits for another lecture.
+                # Fail fast with direction instead.
+                if self.moa:
+                    print(C.s("\n  [MoA ensemble refuses the tool contract — it answers ABOUT tools instead of calling them. Use /moa off and re-run as a single model.]", C.RED))
+                    self.ctx.add("assistant", text, step=step)
+                    try:
+                        cleaned_moa, _ = ToolParser.parse(text)
+                    except Exception:
+                        cleaned_moa = text
+                    _render_markdown(cleaned_moa)
+                    final = cleaned_moa or text
+                    break
                 print(C.s("\n  [model broke character — resetting thread and re-anchoring...]", C.YELLOW))
                 self.client.reset_thread()
                 base_task = next((t.content for t in self.ctx.history if t.role == "user"),
@@ -2173,10 +2193,20 @@ class AgentEngine:
 
             # No-tool nudge (v1.9.6): models other than opus-5-5 often answer a
             # tool task with chat ("What would you like me to do?") instead of
-            # a <tool> tag. Probe-verified 2026-09-29 that every catalog model
+            # a <tool> tag. Probe-verified 2026-09-29 that every SINGLE model
             # DOES emit tags when told to — so re-prompt ONCE per step, pointing
             # at the exact tool the task needs, instead of ending the task.
+            # MoA ensembles are EXCLUDED (v1.9.7): the consensus/aggregator
+            # layer breaks the tool contract structurally (it answers ABOUT
+            # tools instead of emitting them, then refuses the nudge as
+            # "untruthful"). Nudging it only burns credits; re-anchor instead.
             if not calls and step < self.max_steps and not self._stop:
+                if self.moa:
+                    print(C.s("\n  [MoA ensemble answered without a tool call — MoA breaks the Apex tool contract; use /moa off and re-run, or pick a single model]", C.RED))
+                    self.ctx.add("assistant", text, step=step)
+                    _render_markdown(cleaned)
+                    final = cleaned or text
+                    break
                 nudge_tool = self._nudge_tool_for(user_input, last_tc)
                 if nudge_tool and not _refusal_hit(text) and not _upstream_declined(text):
                     print(C.s(f"\n  [no tool call — nudging for {nudge_tool}...]", C.YELLOW))
@@ -2686,6 +2716,7 @@ class ApexCLI:
                     kind = "GPT " if key == "gpt-moa" else ""
                     print(C.s(f"  {old} → {kind}Mixture-of-Agents ({' + '.join(ensemble)})", C.GREEN))
                     print(C.s(f"  [MoA runs every model per step — expect {_moa_burn(ensemble)} credit burn per step]", C.YELLOW))
+                    print(C.s("  [WARNING: MoA ensembles cannot use Apex tools — the consensus layer answers ABOUT tools instead of calling them. MoA is for chat answers only; use /moa off + a single model for tool work.]", C.RED))
                     # A model switch on a live server thread poisons character
                     # (the thread was anchored by the previous model). Reset so
                     # the next task starts clean instead of declining/breaking.
@@ -2748,6 +2779,7 @@ class ApexCLI:
                     self.engine.model = ids[0]
                     print(C.s(f"  Custom MoA ensemble: {' + '.join(ids)}", C.GREEN))
                     print(C.s(f"  [MoA runs every model per step — expect {_moa_burn(ids)} credit burn per step]", C.YELLOW))
+                    print(C.s("  [WARNING: MoA ensembles cannot use Apex tools — the consensus layer answers ABOUT tools instead of calling them. MoA is for chat answers only; use /moa off + a single model for tool work.]", C.RED))
 
         elif cmd == "/search":
             if arg.lower() in ("on", "true", "1"):
