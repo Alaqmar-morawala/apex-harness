@@ -1,6 +1,7 @@
 # HANDOFF — Godot 4 vertical slice + apex harness
 
 **Session:** 2026-09-29 · **Author:** Cline · **apex:** 1.9.9 · **Godot:** 4.7.2.stable.official.ed1daf0bf
+**Resumed:** 2026-09-29 PM (ZCode, two-subagent session) — see §14 for what that changed.
 
 **Purpose:** everything needed to resume without redoing discovery. Read in order:
 this file → `~/games/ApexGame/.apex/skills/godot-4.md` (project skill, auto-discovered by apex) → source.
@@ -33,8 +34,14 @@ If any of these fail, read §8 (gotchas) and §9 (open work) **before** editing 
   (Linux x86_64/32/arm64/arm32, Windows x86_64/32/arm64 debug+release+console, macOS, iOS, Android APK, Web).
 - A playable **native Linux desktop game** exists at `~/games/ApexGame`, exported to
   `build/ApexGame.x86_64`, **proven to open a real window on this machine's GNOME session**.
-- `validate.sh` is the gate: 6 stages, all green as of 16:12.
-- apex harness **v1.9.9 committed and pushed** (the push published 6 previously-unpushed commits, v1.9.4→v1.9.9).
+- `validate.sh` is the gate: 6 stages (plus the agent-added `[double-jump]` scenario), all green as of 19:49.
+- **`~/games/ApexGame` is now a git repo** (branch `main`, local only, no remote): `17e8c90` initial,
+  `44a8185` double-jump via live harness run, `9019c84` Windows/macOS export presets.
+- apex harness **v1.9.9 committed and pushed**; the nudge fix is now **proven live** (exactly 2
+  task-derived nudges, zero placeholder-loop steps — see §14).
+- The three regression suites are **versioned at `~/test/tests/`** (no longer /tmp-only).
+- All three desktop exports exist and are structurally verified: Linux ELF (gate-exported),
+  Windows PE32+ (104M), macOS ad-hoc-signed universal `.app` zip (60M). Only Linux has been *run*.
 - **UE5 remains blocked** — Epic↔GitHub account linking only the user can do. Do not retry blind.
 
 ---
@@ -46,10 +53,10 @@ If any of these fail, read §8 (gotchas) and §9 (open work) **before** editing 
 | `/home/alaqmar/test/apex_harness.py` | The harness (agent loop, tools, skills, CLI) | ~3000 lines |
 | `/home/alaqmar/test/skills/*.md` | 10 bundled skills (brainstorming, code-review, git-workflow, python-testing, security-recon, systematic-debugging, TDD, verification-before-completion, writing-docs, writing-plans) | — |
 | `/home/alaqmar/test/cookies.json`, `cookies_2.json`, `cookies_3.json` | Account pool for Genspark client | 3 files |
-| `/home/alaqmar/games/ApexGame/main.gd` | **All gameplay**, procedurally built, no binary assets | 293 lines |
+| `/home/alaqmar/games/ApexGame/main.gd` | **All gameplay**, procedurally built, no binary assets (now incl. double-jump) | 352 lines |
 | `/home/alaqmar/games/ApexGame/main.tscn` | One `Node3D` + script ref — world is built in code | 161 bytes |
 | `/home/alaqmar/games/ApexGame/project.godot` | 1280x720, `forward_plus`, MSAA 3D=2 | 367 bytes |
-| `/home/alaqmar/games/ApexGame/validate.sh` | The pass/fail gate (the whole workflow hinges on this) | 202 lines |
+| `/home/alaqmar/games/ApexGame/validate.sh` | The pass/fail gate (the whole workflow hinges on this) | 225 lines |
 | `/home/alaqmar/games/ApexGame/.apex/skills/godot-4.md` | **Project skill** — loads into every apex session run from this dir | 94 lines |
 | `/home/alaqmar/games/ApexGame/export_presets.cfg` | Single preset: `name="Linux"`, `x86_64` | — |
 | `/home/alaqmar/games/ApexGame/build/ApexGame.x86_64` | Shipped binary (ELF x86-64, includes the test hooks) | 73,530,488 B |
@@ -57,8 +64,9 @@ If any of these fail, read §8 (gotchas) and §9 (open work) **before** editing 
 | `~/.local/share/godot/export_templates/4.7.2.stable/` | Templates for all platforms | — |
 | `/home/alaqmar/games/godot/Godot_v4.7.2-stable_linux.x86_64` | Engine binary; `~/.local/bin/godot` symlinks to it | — |
 
-**Not version-controlled:** `~/games/ApexGame` is **not** a git repo (`fatal: not a git repository`).
-That is the single largest durability risk — see §9.2.
+**Version control:** `~/games/ApexGame` **is now a git repo** (branch `main`, local only — no
+remote configured). `build/` and `.godot/` are ignored; gameplay, gate, skill, presets and the
+`HANDOFF.md` symlink (stored as a real symlink) are committed.
 
 ---
 
@@ -278,22 +286,30 @@ heading `Bugs #1–#10`, new **Bug #10** entry, suite counts), `README.md` statu
 
 ## 9. Open work (priority order)
 
-1. **Give it a task that requires NEW mechanics** (not a timer tweak) and watch whether the
-   agent *extends* `--scenarios` itself. That is the real test of the skill loop; today only I
-   extended the gate. The skill explicitly instructs: add hook → assert in `validate.sh`.
-2. **Put `~/games/ApexGame` under version control.** Highest durability risk: 293 lines of
-   gameplay, a 202-line gate, and a skill file exist only on disk.
-3. **Add Windows / macOS export presets** — templates for *both* are already installed and
-   verified present, but only the Linux preset exists. Untested.
-4. **Calibrate the pixel thresholds.** Currently `mean>=6 && std>=5 && colors>=40`, validated
-   against a black-frame negative control but **not** against an intentionally dark scene
+1. ~~**Give it a task that requires NEW mechanics**~~ — **DONE 2026-09-29 PM (§14).** Double-jump
+   task; the agent *extended `--scenarios` itself* (new `[double-jump]` stage + `APEX_TEST_DOUBLE_JUMP`
+   hook) and finished in 20/50 steps with the gate green. The skill loop works unassisted.
+2. ~~**Put `~/games/ApexGame` under version control.**~~ — **DONE 2026-09-29 PM.** Branch `main`,
+   local only (no remote). Consider giving it a GitHub remote next if durability off-box matters.
+3. ~~**Add Windows / macOS export presets.**~~ — **DONE 2026-09-29 PM (§14).** Windows PE32+ (104M)
+   and macOS universal ad-hoc-signed `.app` zip (60M) both export clean. Caveat: **structurally
+   verified only** — neither has ever been executed (no Wine, no mac on this box).
+4. **Calibrate the pixel thresholds.** Still open. Currently `mean>=6 && std>=5 && colors>=40`,
+   validated against a black-frame negative control but **not** against an intentionally dark scene
    (a night level would legitimately fail).
-5. **Prove the nudge fix on a *live* task + move the test suites into the repo.**
-   v1.9.9 now has 14 unit checks (incl. the greedy-prose bug), but no live agent run has
-   re-entered the no-tool loop end-to-end. Suite-move half is **done** (2026-09-29): all three
-   suites now live in `~/test/tests/`, allowlisted in `.gitignore` and committed — see §7.
-6. **Re-export after any `main.gd` change** — `build/ApexGame.x86_64` currently includes the
-   hooks, but the binary is an artifact, not source of truth.
+5. ~~**Prove the nudge fix on a *live* task + move the test suites into the repo.**~~ — **DONE, both
+   halves, 2026-09-29 PM (§14).** Suites at `~/test/tests/` (26/26, 18/18, 104/104, unchanged code);
+   live run fired exactly 2 task-derived nudges then accepted the no-tool summary as completion.
+6. ~~**Re-export after any `main.gd` change.**~~ — **DONE 2026-09-29 PM.** `./validate.sh --export`
+   PASS; fresh ELF with the double-jump build (73,532,392 B). Standing rule: re-export after edits.
+7. **NEW — harness hardening candidates observed live** (§14 has the evidence):
+   - `apex_harness.py` **exits 0 even on a fatal upstream error** (account-pool failover exhausted,
+     `ConnectionResetError`) — callers/scripts cannot detect the failure.
+   - `edit_file` **prepends the matched line's original indentation** onto the replacement's first
+     line → over-indented GDScript; the gate caught it (Parse Error) but it cost the agent steps.
+   - File rewrites **drop the executable bit** (100755→100644); hit `validate.sh` in *both* runs.
+     Attempt 2 self-diagnosed via `git diff --summary` + `chmod`; attempt 1 never noticed.
+   These are unfixed — diagnose, fix, add tests, bump to v1.9.10, and add ledger entries.
 
 ---
 
@@ -309,12 +325,15 @@ heading `Bugs #1–#10`, new **Bug #10** entry, suite counts), `README.md` statu
 
 ## 11. Not proven / honest limitations
 
-- Only **Linux** was exported and run. Windows/macOS/Android/Web exports are *possible*, not *tested*.
+- Only **Linux** has been *executed*. Windows (PE32+) and macOS (universal `.app` zip, ad-hoc
+  signed) exports exist and are structurally verified (`file`, zip listing) but have never been
+  run — no Wine, no mac on this box. Android/Web remain *possible*, not attempted.
 - `--gpu` asserts "no errors + window created"; it does **not** judge visual correctness.
   `--shot` gets closer (mean/std/colour count) but is still a heuristic, not a diff.
 - The `R` reset path is exercised by the **hook**, not by a real keypress.
 - No coverage for audio, gamepad input, save/load, networking, or frame-time/perf.
-- The Opus 5.5 run hit the 30-step ceiling; the task completed, but that budget is tight.
+- The timer task consumed all 30 steps; the double-jump run finished in 20/50 with budget to
+  spare (§14) — 50 is a comfortable default for a feature-sized task.
 - No human has visually confirmed the game looks right — `build/last_frame.png` is the evidence.
 
 
@@ -328,6 +347,7 @@ python3 -m py_compile ~/test/apex_harness.py && python3 ~/test/apex_harness.py -
 git -C ~/test status -sb                    # → clean, in sync with origin/main
 cd ~/games/ApexGame && ./validate.sh        # → PASS
 cd ~/games/ApexGame && ./validate.sh --scenarios   # → TIME_UP x2, ROUND_RESET x1
+#   → plus ok [double-jump] GROUND_JUMP AIR_JUMP AIR_JUMP_IGNORED AIR_JUMP_RESTORED
 cd ~/games/ApexGame && ./validate.sh --shot         # → ok [pixel] mean≈47-48 std≈26-27 colors≈102-104
 #   (stats drift by a few units run to run; the FAIL threshold is mean<6 || std<5 || colors<40)
 python3 -c "import sys; sys.path.insert(0,'/home/alaqmar/test'); from apex_harness import SkillStore; \
@@ -382,8 +402,51 @@ wmctrl -l
 pkill -f ApexGame.x86_64
 ```
 
-**Gate stage source map** (`validate.sh`): import L76 (verdict L79), run L87, scenarios L95–120,
-pixel L124–159, gpu L164–179, export L183–189, final verdict L201.
+**Gate stage source map** (`validate.sh`, as of 225 lines — shifted by the agent-added double-jump
+stage): import verdict L79, run verdict L87, scenarios ok L120, double-jump ok L143, pixel ok L182,
+gpu ok L202, export ok L212, final PASS L221 / FAIL L224.
+
+## 14. Resumption log — 2026-09-29 PM (two-subagent session)
+
+Executed §9 items 1, 2, 3, 5, 6: two parallel subagents (ApexGame durability + live task; suite
+repatriation) plus orchestrator work (exports, docs). Verbatim harness logs: `/tmp/apex_live_task.log`
+(attempt 2, success) and `/tmp/apex_live_task.attempt1.log` (attempt 1, network death).
+
+1. **ApexGame versioned (§9.2).** `git init -b main`, initial commit `17e8c90` — 11 files
+   (incl. `main.gd.uid`, `icon.svg*`; `.gitignore` excludes `build/`, `.godot/`, editor junk).
+   `HANDOFF.md` committed as a true symlink (mode 120000).
+2. **Live harness task (§9.1 + §9.5a) — the v1.9.9 experiment.** Double-jump task text deliberately
+   did NOT mention hooks. Attempt 1: died step 19/50 on `ConnectionResetError(104)` after the
+   account-pool failover exhausted retries (infrastructure, not harness logic; work reverted).
+   Attempt 2: **20/50 steps, ~5 min, gate PASS**, committed as `44a8185`.
+   - **The agent extended the gate on its own initiative**: added a `[double-jump]` `--scenarios`
+     stage asserting `GROUND_JUMP AIR_JUMP AIR_JUMP_IGNORED AIR_JUMP_RESTORED`, backed by a new
+     `APEX_TEST_DOUBLE_JUMP` hook (deterministic time-window virtual presses).
+   - **Nudge fix proven end-to-end**: exactly 2 nudge events (cap respected), both bodies
+     task-derived (→ `./validate.sh`, never `pwd && ls`), each led straight to a PASS rerun, and
+     the no-tool summary was then accepted as completion at step 20 — vs. the pre-fix behavior of
+     burning ~10-30 steps re-listing a directory.
+   - One cosmetic regression survives in `validate.sh` (one `else` line gained a tab —
+     bash-insensitive, gate green). Left as-is; fix opportunistically.
+3. **Suites versioned (§9.5b).** Commit `056e332` in `~/test`: new `tests/` (3 files, 635 lines),
+   `.gitignore` allowlist (`!tests/` + `!tests/**`), doc paths synced in §7/§12 and
+   `APEX_HARNESS_HANDOFF.md`. All three pass from the new location with **zero code changes**
+   (their `sys.path` targets the repo root): 26/26, 18/18, 104/104.
+4. **Windows/macOS export presets (§9.3).** Commit `9019c84` in ApexGame. Windows: `PE32+ executable
+   for MS Windows, x86-64`, 104M (pck embedded). macOS needed two things: `texture_format/etc2_astc=true`
+   (+`s3tc_bptc`) in the preset options, **and** `textures/vram_compression/import_etc2_astc=true` in
+   **project.godot** — the export check reads the *project setting*, not the preset option (that one
+   cost a retry). Result: 60M zip containing a proper `ApexGame.app` (Info.plist, `icon.icns`,
+   `_CodeSignature/` = embedded-rcodesign ad-hoc signing works headless on Linux), binary confirmed
+   universal via `file` (x86_64 + arm64). **Neither Windows nor macOS artifact has ever been executed.**
+5. **Linux re-export (§9.6).** `./validate.sh --export` → PASS; fresh 73,532,392 B ELF with the
+   double-jump build. Full regression after all changes: default gate PASS, scenarios PASS (incl.
+   `[double-jump]`), pixel PASS (mean=48.0 std=26.6 colors=104), suites 26/18/104 all green.
+
+**Harness defects observed live** (now §9.7; unfixed, target v1.9.10): exit code 0 on fatal
+upstream error; `edit_file` prepending the matched line's indentation onto the replacement's first
+line; file rewrites dropping the exec bit (hit `validate.sh` in both attempts — attempt 2
+self-diagnosed via `git diff --summary` + `chmod`).
 
 *End of handoff.*
 
