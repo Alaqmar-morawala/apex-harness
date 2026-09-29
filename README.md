@@ -68,4 +68,4 @@ Full engineering detail — including the six critical bugs solved during develo
 
 ---
 
-*Status: v1.1.0 — QA-verified with 26/26 unit tests and an 11/11 live end-to-end acceptance suite.*
+*Status: v1.9.3 — QA-verified with 26/26 unit tests, 18/18 Windows shell tests, and 34/34 adversarial bug-verification tests.*

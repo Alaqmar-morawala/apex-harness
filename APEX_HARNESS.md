@@ -35,7 +35,7 @@ Enable web search capabilities:
 | Flag | Default | Description |
 |---|---|---|
 | `-q, --query <str>` | `None` | Run in non-interactive single-task mode |
-| `--model <str>` | `claude-sonnet-5` | Select model from the catalog |
+| `--model <str>` | `claude-opus-5-5` | Select model from the catalog |
 | `--cookies <path>` | `cookies.json` | Path to cookie file(s), comma-separated |
 | `--search` | `False` | Enable Genspark AI Chat live web search |
 | `--max-steps <int>` | `30` | Max ReAct iterations per task |

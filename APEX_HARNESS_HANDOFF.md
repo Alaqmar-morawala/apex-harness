@@ -1,5 +1,5 @@
 # APEX HARNESS — COMPREHENSIVE ENGINEERING HANDOFF & ARCHITECTURE MANUAL
-**Version:** 1.9.2  
+**Version:** 1.9.3  
 **Date:** 2026-09-29  
 **GitHub Repository:** [https://github.com/Alaqmar-morawala/apex-harness](https://github.com/Alaqmar-morawala/apex-harness) (Public, Branch `main`)  
 **Host Environment:** Linux 7.1.5+kali-amd64 x64 (`Alaqmars-WorkStation`)  
@@ -223,11 +223,11 @@ payload = {
    - **Purpose**: Cross-vendor intelligence. Combines OpenAI's two newest Sol flagships with Anthropic Opus reasoning. The best quality-to-cost ratio for heavy architecture work.
 2. **`gpt-moa`** (`/model gpt-moa`):
    - **Ensemble**: `gpt-5.5-pro` + `gpt-5.4-pro` + `gpt-5.6-sol` + `gpt-6-sol`
-   - **Burn Rate**: ~69x credits (contains two 30x Pro models).
+   - **Burn Rate**: ~68x credits (30+30+4+4 — contains two 30x Pro models; the old `~4x` banner was wrong).
    - **Purpose**: Maximum raw reasoning power for the hardest mathematical, algorithmic, or security logic.
 3. **`genspark-moa`** (`/model genspark-moa`):
    - **Ensemble**: `gpt-5.1-low` + `claude-sonnet-4-6` + `gemini-3.1-pro-preview`
-   - **Burn Rate**: ~3x credits.
+   - **Burn Rate**: ~6x credits (1+3+2; `gpt-5.1-low` catalogued at 1x — unverified upstream tier).
    - **Purpose**: General consensus coding.
 4. **Custom Ensembles**:
    - `/moa <model1> <model2> ...` (e.g. `/moa gpt-6-sol claude-sonnet-5 gemini-3.8-flash`).
@@ -399,8 +399,9 @@ apex --model gpt-moa
 
 ### Cookie Resolution Order
 When running globally outside `/home/alaqmar/test`:
-1. `./cookies.json` in the current working directory (if project-specific accounts exist).
-2. Falls back automatically to `/home/alaqmar/test/cookies.json` (the global install directory).
+1. `./cookies*.json` in the current working directory (the whole fleet: `cookies.json`, `cookies_2.json`, ...).
+2. Falls back automatically to the whole fleet next to `apex_harness.py` (`/home/alaqmar/test/cookies*.json` — v1.9.3 fix: the old fallback loaded only `cookies.json`, stranding the pool on 1 account).
+3. `GENSPARK_COOKIES_JSON` env var (single jar or list of jars).
 
 ### Windows Native Support (`apex.cmd`)
 - On Windows, `apex_harness.py` automatically initializes `_WindowsShell` (`cmd.exe /Q /K /D`) instead of PTY bash.
