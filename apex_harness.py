@@ -27,6 +27,7 @@ import platform
 import queue
 import re
 import subprocess
+import shutil
 import sys
 import textwrap
 import threading
@@ -58,7 +59,7 @@ if _POSIX:
 # § 1. CONSTANTS & CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
-VERSION = "1.9.10"
+VERSION = "1.10.1"
 GENSPARK_API = "https://www.genspark.ai/api/agent/ask_proxy"
 # VERIFIED via message_result.session_state._llm_model (server-reported):
 # "Claude Opus 5.5" (the web-UI name) maps to API id **claude-opus-5-5** (hyphen).
@@ -106,44 +107,82 @@ class C:
 
 
 MODEL_CATALOG: Dict[str, Dict[str, str]] = {
+    # Anthropic Claude
     "claude-opus-5-5":            {"label": "Claude Opus 5.5",         "tier": "5x",   "cls": "reasoning"},
     "claude-opus-5":              {"label": "Claude Opus 5",           "tier": "5x",   "cls": "reasoning"},
     "claude-opus-4-8":            {"label": "Claude Opus 4.8",         "tier": "5x",   "cls": "reasoning"},
     "claude-opus-4-7":            {"label": "Claude Opus 4.7",         "tier": "5x",   "cls": "reasoning"},
     "claude-opus-4-6":            {"label": "Claude Opus 4.6",         "tier": "5x",   "cls": "reasoning"},
+    "claude-opus-4-5":            {"label": "Claude Opus 4.5",         "tier": "5x",   "cls": "reasoning"},
+    "claude-sonnet-5-5":          {"label": "Claude Sonnet 5.5",       "tier": "3x",   "cls": "coding"},
     "claude-sonnet-5":            {"label": "Claude Sonnet 5",         "tier": "2x",   "cls": "coding"},
     "claude-sonnet-4-6":          {"label": "Claude Sonnet 4.6",       "tier": "3x",   "cls": "coding"},
+    "claude-sonnet-4-5":          {"label": "Claude Sonnet 4.5",       "tier": "3x",   "cls": "coding"},
+    "claude-sonnet-4":            {"label": "Claude Sonnet 4",         "tier": "3x",   "cls": "coding"},
     "claude-4-5-haiku":           {"label": "Claude Haiku 4.5",        "tier": "1x",   "cls": "fast"},
+
+    # OpenAI GPT
     "gpt-5.5-pro":                {"label": "GPT-5.5 Pro",             "tier": "30x",  "cls": "reasoning"},
     "gpt-5.4-pro":                {"label": "GPT-5.4 Pro",             "tier": "30x",  "cls": "reasoning"},
     "gpt-5.2-pro":                {"label": "GPT-5.2 Pro",             "tier": "21x",  "cls": "reasoning"},
-    "gpt-5.1-low":                {"label": "GPT-5.1 Low",             "tier": "1x",   "cls": "fast"},
-    "gpt-5.6-sol":                {"label": "GPT-5.6 Sol",             "tier": "4x",   "cls": "coding"},
+    "gpt-6.1-sol":                {"label": "GPT-6.1 Sol",             "tier": "4x",   "cls": "coding"},
     "gpt-6-sol":                  {"label": "GPT-6 Sol",               "tier": "4x",   "cls": "coding"},
     "gpt-6-luna":                 {"label": "GPT-6 Luna",              "tier": "0.2x", "cls": "fast"},
+    "gpt-5.6-sol":                {"label": "GPT-5.6 Sol",             "tier": "4x",   "cls": "coding"},
+    "gpt-5.6-terra":              {"label": "GPT-5.6 Terra",           "tier": "2x",   "cls": "coding"},
+    "gpt-5.6-luna":               {"label": "GPT-5.6 Luna",            "tier": "0.2x", "cls": "fast"},
     "gpt-5.5":                    {"label": "GPT-5.5",                 "tier": "5x",   "cls": "coding"},
     "gpt-5.4":                    {"label": "GPT-5.4",                 "tier": "3x",   "cls": "coding"},
-    "gpt-5.6-terra":              {"label": "GPT-5.6 Terra",           "tier": "2x",   "cls": "coding"},
     "gpt-5.4-mini":               {"label": "GPT-5.4 Mini",            "tier": "1x",   "cls": "fast"},
-    "gpt-5.6-luna":               {"label": "GPT-5.6 Luna",            "tier": "0.2x", "cls": "fast"},
     "gpt-5.4-nano":               {"label": "GPT-5.4 Nano",            "tier": "0.2x", "cls": "fast"},
+    "gpt-5.2":                    {"label": "GPT-5.2",                 "tier": "2x",   "cls": "coding"},
+    "gpt-5.1-high":               {"label": "GPT-5.1 Thinking High",   "tier": "3x",   "cls": "reasoning"},
+    "gpt-5.1-medium":             {"label": "GPT-5.1 Thinking",        "tier": "2x",   "cls": "reasoning"},
+    "gpt-5.1-low":                {"label": "GPT-5.1 Instant",         "tier": "1x",   "cls": "fast"},
+
+    # Google Gemini
     "gemini-3.1-pro-preview":     {"label": "Gemini 3.1 Pro Preview",  "tier": "2x",   "cls": "coding"},
     "gemini-3.8-flash":           {"label": "Gemini 3.8 Flash",        "tier": "0.75x","cls": "fast"},
     "gemini-3.7-flash":           {"label": "Gemini 3.7 Flash",        "tier": "0.75x","cls": "fast"},
     "gemini-3.6-flash":           {"label": "Gemini 3.6 Flash",        "tier": "0.75x","cls": "fast"},
     "gemini-3.5-flash":           {"label": "Gemini 3.5 Flash",        "tier": "2x",   "cls": "coding"},
     "gemini-3-flash-preview":     {"label": "Gemini 3 Flash Preview",  "tier": "0.5x", "cls": "fast"},
+    "gemini-2.5-flash":           {"label": "Gemini 2.5 Flash",        "tier": "0.5x", "cls": "fast"},
     "gemini-3.1-flash-lite-preview": {"label": "Gemini 3.1 Flash Lite","tier": "0.3x", "cls": "fast"},
+
+    # xAI Grok
+    "grok-4.7":                   {"label": "Grok 4.7",                "tier": "2x",   "cls": "coding"},
     "grok-4.6":                   {"label": "Grok 4.6",                "tier": "2x",   "cls": "coding"},
     "grok-4.5":                   {"label": "Grok 4.5",                "tier": "2x",   "cls": "coding"},
-    "muse-spark-1.3":             {"label": "Muse Spark 1.3",          "tier": "1x",   "cls": "coding"},
+
+    # DeepSeek
+    "deep-seek-v4.1-flash":       {"label": "DeepSeek V4.1 Flash",     "tier": "1x",   "cls": "coding"},
     "deepseek-v4-pro":            {"label": "DeepSeek V4 Pro",         "tier": "2x",   "cls": "coding"},
+
+    # Moonshot Kimi
     "kimi-k3":                    {"label": "Kimi K3",                 "tier": "3x",   "cls": "coding"},
+
+    # Minimax
     "minimax-m3":                 {"label": "Minimax M3",              "tier": "0.3x", "cls": "fast"},
+
+    # Zhipu GLM
+    "glm-5p3":                    {"label": "GLM-5.3",                 "tier": "1x",   "cls": "coding"},
+    "glm-5p3-flash-baseten":      {"label": "GLM-5.3 Flash",           "tier": "0.5x", "cls": "fast"},
     "glm-5.3":                    {"label": "GLM-5.3",                 "tier": "1x",   "cls": "coding"},
+
+    # NVIDIA
+    "nemotron-3-ultra":           {"label": "Nemotron 3 Ultra",        "tier": "2x",   "cls": "coding"},
+
+    # Xiaomi MiMo
+    "mimo-v2.6-pro":              {"label": "MiMo V2.6 Pro",           "tier": "2x",   "cls": "coding"},
+    "mimo-v2.6-flash":            {"label": "MiMo V2.6 Flash",         "tier": "0.5x", "cls": "fast"},
+
+    # Other
+    "muse-spark-1.3":             {"label": "Muse Spark 1.3",          "tier": "1x",   "cls": "coding"},
 }
 
 MOA_DEFAULT = ["gpt-5.1-low", "claude-sonnet-4-6", "gemini-3.1-pro-preview"]
+MOA_GENSPARK_V2 = ["gpt-5.6-luna", "gpt-6.1-sol", "gemini-3.7-flash"]
 # All-best-GPT ensemble — every id server-verified (gpt-5.5-pro serves as a
 # dated variant; prefix match counts as honored). gpt-6-sol added 2026-09-29
 # per user request (replaces gpt-5.5). Two 30x-tier members: expect ~68x burn
@@ -153,10 +192,14 @@ MOA_GPT = ["gpt-5.5-pro", "gpt-5.4-pro", "gpt-5.6-sol", "gpt-6-sol"]
 # Hybrid ensemble (user-requested 2026-09-29): the two Sol flagships + Opus 4.8
 # — cross-vendor coverage (2x GPT + 1x Claude) at ~13x burn, far under gpt-moa.
 MOA_HYBRID = ["gpt-6-sol", "gpt-5.6-sol", "claude-opus-4-8"]
+MOA_SOL = ["gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol"]
+
 MOA_PRESETS = {
     "genspark-moa": MOA_DEFAULT,
+    "genspark-moa-v2": MOA_GENSPARK_V2,
     "gpt-moa": MOA_GPT,
     "hybrid-moa": MOA_HYBRID,
+    "sol-moa": MOA_SOL,
 }
 MOA_ALIASES = {
     "mixture-of-agents": "genspark-moa",
@@ -164,6 +207,44 @@ MOA_ALIASES = {
     "gpt-mixture": "gpt-moa",
     "moa-hybrid": "hybrid-moa",
     "sol-opus": "hybrid-moa",
+    "genspark-latest": "genspark-moa-v2",
+    "moa-v2": "genspark-moa-v2",
+    "moa-latest": "genspark-moa-v2",
+    "all-sol": "sol-moa",
+}
+
+MODEL_ALIASES: Dict[str, str] = {
+    # Short names & dot-variants
+    "opus-5.5": "claude-opus-5-5",
+    "opus-5": "claude-opus-5",
+    "opus-4.8": "claude-opus-4-8",
+    "opus-4.7": "claude-opus-4-7",
+    "opus-4.6": "claude-opus-4-6",
+    "opus-4.5": "claude-opus-4-5",
+    "sonnet-5.5": "claude-sonnet-5-5",
+    "sonnet-5": "claude-sonnet-5",
+    "sonnet-4.6": "claude-sonnet-4-6",
+    "sonnet-4.5": "claude-sonnet-4-5",
+    "sonnet-4": "claude-sonnet-4",
+    "haiku-4.5": "claude-4-5-haiku",
+    "gpt-6.1": "gpt-6.1-sol",
+    "gpt-6": "gpt-6-sol",
+    "gpt-5.6": "gpt-5.6-sol",
+    "gpt-5.1": "gpt-5.1-high",
+    "gpt-5.1-instant": "gpt-5.1-low",
+    "gpt-5.1-thinking": "gpt-5.1-medium",
+    "grok-4": "grok-4.7",
+    "grok": "grok-4.7",
+    "deepseek": "deep-seek-v4.1-flash",
+    "deepseek-v4.1": "deep-seek-v4.1-flash",
+    "deepseek-flash": "deep-seek-v4.1-flash",
+    "glm": "glm-5p3",
+    "glm-5.3-flash": "glm-5p3-flash-baseten",
+    "nemotron": "nemotron-3-ultra",
+    "nemotron-3": "nemotron-3-ultra",
+    "mimo": "mimo-v2.6-pro",
+    "mimo-pro": "mimo-v2.6-pro",
+    "mimo-flash": "mimo-v2.6-flash",
 }
 
 
@@ -335,6 +416,14 @@ class ThreadResetByFailover(RuntimeError):
     different account than the one now serving the request."""
 
 
+# Cloudflare now TLS-fingerprints the ask_proxy endpoint and rejects the
+# python-requests JA3 with a flat "bad request cf" (v1.9.11). curl_cffi
+# impersonates a real Chrome TLS stack; requests remains the fallback.
+try:
+    from curl_cffi import requests as _cf_requests
+except ImportError:
+    _cf_requests = None
+
 class GensparkClient:
     def __init__(self, cookie_spec: Optional[str] = None):
         self.cookie_spec = cookie_spec
@@ -457,6 +546,43 @@ class GensparkClient:
             "Accept": "text/event-stream",
         }
 
+
+    def _curl_stream_request(self, payload: Dict[str, Any], headers: Dict[str, str],
+                             cookie_str: str, timeout: int):
+        """POST ask_proxy via the system curl binary.
+
+        Returns (http_status, set_cookie_pairs, line_iterator). The header
+        block is parsed out of `-i` output, then SSE lines stream from stdout.
+        """
+        cmd = ["curl", "-4", "-s", "-N", "-i", "--max-time", str(timeout),
+               "-X", "POST", GENSPARK_API, "--data-binary", "@-"]
+        for k, v in headers.items():
+            cmd += ["-H", f"{k}: {v}"]
+        if cookie_str:
+            cmd += ["-H", f"Cookie: {cookie_str}"]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        proc.stdin.write(json.dumps(payload).encode())
+        proc.stdin.close()
+        header_blob = b""
+        while (b"\r\n\r\n" not in header_blob and b"\n\n" not in header_blob):
+            byte = proc.stdout.read(1)
+            if not byte:
+                break
+            header_blob += byte
+        header_text = header_blob.decode("utf-8", "replace")
+        status = 0
+        m = re.match(r"HTTP/[\d.]+ (\d{3})", header_text)
+        if m:
+            status = int(m.group(1))
+        set_cookies = [line.split(":", 1)[1].strip() for line in header_text.splitlines()
+                       if line.lower().startswith("set-cookie:")]
+        def _lines():
+            for raw in proc.stdout:
+                yield raw.decode("utf-8", "replace").rstrip("\r\n")
+            proc.wait()
+        return status, set_cookies, _lines()
+
     def stream(
         self,
         query: str,
@@ -522,37 +648,92 @@ class GensparkClient:
                 payload["models"] = moa_models
 
             try:
-                r = acc.session.post(
-                    GENSPARK_API, json=payload, headers=self._headers(),
-                    stream=True, timeout=180,
-                )
-                if r.status_code in (401, 403):
-                    acc.mark_auth_error()
-                    last_err = requests.HTTPError(f"HTTP {r.status_code} Unauthorized", response=r)
-                    print(C.s(
-                        f"  [pool] {acc.tag} auth error ({r.status_code}) → disabled, failover "
-                        f"({attempt+1}/{max_tries})", C.YELLOW
-                    ))
-                    if attempt + 1 < max_tries:
-                        time.sleep(1.0)
-                        continue
-                    raise last_err
-                if r.status_code == 429:
-                    acc.mark_429()
-                    last_err = requests.HTTPError("429", response=r)
-                    print(C.s(
-                        f"  [pool] {acc.tag} rate-limited → failover "
-                        f"({attempt+1}/{max_tries})", C.YELLOW
-                    ))
-                    if attempt + 1 < max_tries:
-                        time.sleep(1.5)
-                        continue
-                    raise last_err
-                r.raise_for_status()
+                curl_bin = shutil.which("curl")
+                if curl_bin:
+                    cookie_str = "; ".join(f"{k}={v}" for k, v in acc.session.cookies.get_dict().items())
+                    status_code, set_cookies, line_iter = self._curl_stream_request(
+                        payload, self._headers(), cookie_str, 180)
+                    for sc in set_cookies:
+                        pair = sc.split(";", 1)[0]
+                        if "=" in pair:
+                            n, _, v = pair.partition("=")
+                            acc.session.cookies.set(n.strip(), v.strip())
+                else:
+                    status_code = None
+                    line_iter = None
+                if curl_bin:
+                    if status_code in (401, 403):
+                        acc.mark_auth_error()
+                        last_err = requests.HTTPError(f"HTTP {status_code} Unauthorized")
+                        print(C.s(
+                            f"  [pool] {acc.tag} auth error ({status_code}) → disabled, failover "
+                            f"({attempt+1}/{max_tries})", C.YELLOW
+                        ))
+                        if attempt + 1 < max_tries:
+                            time.sleep(1.0)
+                            continue
+                        raise last_err
+                    if status_code == 429:
+                        acc.mark_429()
+                        last_err = requests.HTTPError("429")
+                        print(C.s(
+                            f"  [pool] {acc.tag} rate-limited → failover "
+                            f"({attempt+1}/{max_tries})", C.YELLOW
+                        ))
+                        if attempt + 1 < max_tries:
+                            time.sleep(1.5)
+                            continue
+                        raise last_err
+                    if status_code >= 400:
+                        last_err = requests.HTTPError(f"HTTP Error {status_code}:")
+                        raise last_err
+                else:
+                    if _cf_requests is not None:
+                        cf_s = _cf_requests.Session(impersonate="chrome")
+                        r = cf_s.post(GENSPARK_API, json=payload, headers=self._headers(),
+                                      cookies=acc.session.cookies.get_dict(), stream=True, timeout=180)
+                        for ck, cv in r.cookies.get_dict().items():
+                            acc.session.cookies.set(ck, cv)
+                    else:
+                        r = acc.session.post(
+                            GENSPARK_API, json=payload, headers=self._headers(),
+                            stream=True, timeout=180,
+                        )
+                    if r.status_code in (401, 403):
+                        acc.mark_auth_error()
+                        last_err = requests.HTTPError(f"HTTP {r.status_code} Unauthorized", response=r)
+                        print(C.s(
+                            f"  [pool] {acc.tag} auth error ({r.status_code}) → disabled, failover "
+                            f"({attempt+1}/{max_tries})", C.YELLOW
+                        ))
+                        if attempt + 1 < max_tries:
+                            time.sleep(1.0)
+                            continue
+                        raise last_err
+                    if r.status_code == 429:
+                        acc.mark_429()
+                        last_err = requests.HTTPError("429", response=r)
+                        print(C.s(
+                            f"  [pool] {acc.tag} rate-limited → failover "
+                            f"({attempt+1}/{max_tries})", C.YELLOW
+                        ))
+                        if attempt + 1 < max_tries:
+                            time.sleep(1.5)
+                            continue
+                        raise last_err
+                    r.raise_for_status()
 
                 text = ""
                 finished = False
-                for line in r.iter_lines(decode_unicode=True):
+                if curl_bin:
+                    source_lines = line_iter
+                else:
+                    source_lines = r.iter_lines()
+                for line in source_lines:
+                    if line is None:
+                        continue
+                    if isinstance(line, bytes):
+                        line = line.decode("utf-8", "replace")
                     if not line or not line.startswith("data:"):
                         continue
                     try:
@@ -604,7 +785,7 @@ class GensparkClient:
                     # bounce requests off this account on every rotation
                     acc.cooldown = 1800
                     acc.mark_429()
-                    last_err = requests.HTTPError("account usage window exhausted", response=r)
+                    last_err = requests.HTTPError("account usage window exhausted")
                     print(C.s(
                         f"  [pool] {acc.tag} usage window exhausted → failover "
                         f"({attempt+1}/{max_tries})", C.YELLOW
@@ -2608,7 +2789,8 @@ class AgentEngine:
                 prompt = (a.get("prompt") or "").strip()
                 if not prompt:
                     return "[error] subagent requires a 'prompt' attribute describing the self-contained task."
-                model = a.get("model") or self.model
+                raw_model = a.get("model") or self.model
+                model = MODEL_ALIASES.get(raw_model, raw_model)
                 steps = a.get("max_steps") or SUBAGENT_MAX_STEPS
                 return self._run_subagent(prompt, model, int(steps))
             else:
@@ -2789,19 +2971,22 @@ class ApexCLI:
         self.skills = SkillStore()
         self.tools = ToolRegistry(self.shell, self.snaps, skills=self.skills)
         self.ctx = ContextManager()
+        _model_req = MODEL_ALIASES.get(args.model, args.model)
         self.engine = AgentEngine(
             client=self.client,
             tools=self.tools,
             context=self.ctx,
-            model=args.model,
+            model=_model_req,
             max_steps=args.max_steps,
             search=args.search,
             skills=self.skills,
         )
-        _moa_key = MOA_ALIASES.get(args.model, args.model)
+        _moa_key = MOA_ALIASES.get(_model_req, _model_req)
         if _moa_key in MOA_PRESETS:
             self.engine.moa = list(MOA_PRESETS[_moa_key])
             self.engine.model = MOA_PRESETS[_moa_key][0]
+        else:
+            self.engine.model = _model_req
         self.query = args.query
 
         # readline history (POSIX; Windows console host provides basic line editing)
@@ -2876,7 +3061,8 @@ class ApexCLI:
 
         elif cmd == "/model":
             if arg:
-                key = MOA_ALIASES.get(arg, arg)
+                mapped = MODEL_ALIASES.get(arg, arg)
+                key = MOA_ALIASES.get(mapped, mapped)
                 if key in MOA_PRESETS:
                     ensemble = MOA_PRESETS[key]
                     old = self.engine.model + (" + MoA" if self.engine.moa else "")
@@ -2884,7 +3070,7 @@ class ApexCLI:
                         self._moa_prev_model = self.engine.model
                     self.engine.moa = list(ensemble)
                     self.engine.model = ensemble[0]  # primary = ensemble lead (this is what gets billed)
-                    kind = "GPT " if key == "gpt-moa" else ""
+                    kind = "GPT " if key == "gpt-moa" else ("Sol " if key == "sol-moa" else "")
                     print(C.s(f"  {old} → {kind}Mixture-of-Agents ({' + '.join(ensemble)})", C.GREEN))
                     print(C.s(f"  [MoA runs every model per step — expect {_moa_burn(ensemble)} credit burn per step]", C.YELLOW))
                     print(C.s("  [WARNING: MoA ensembles cannot use Apex tools — the consensus layer answers ABOUT tools instead of calling them. MoA is for chat answers only; use /moa off + a single model for tool work.]", C.RED))
@@ -2895,12 +3081,12 @@ class ApexCLI:
                         self.client.reset_thread()
                         self.client.save_thread_state()
                         print(C.s("  [thread reset for the model switch — next task starts a clean thread]", C.DIM))
-                elif arg in MODEL_CATALOG:
+                elif mapped in MODEL_CATALOG:
                     old = self.engine.model + (" + MoA" if self.engine.moa else "")
-                    self.engine.model = arg
+                    self.engine.model = mapped
                     self.engine.moa = None
-                    t = MODEL_CATALOG[arg]["tier"]
-                    print(C.s(f"  {old} → {arg} ({t})", C.GREEN))
+                    t = MODEL_CATALOG[mapped]["tier"]
+                    print(C.s(f"  {old} → {mapped} ({t})", C.GREEN))
                     if self.client.project_id is not None:
                         self.client.reset_thread()
                         self.client.save_thread_state()
@@ -2920,7 +3106,7 @@ class ApexCLI:
                 for key, ensemble in MOA_PRESETS.items():
                     moa_mark = C.s(" ◀", C.GREEN) if (moa_on and self.engine.moa == list(ensemble)) else ""
                     print(f"    {C.CYAN}{key:40s}{C.RESET} {'MoA':>5s}  {C.DIM}ensemble: {' + '.join(ensemble)}{C.RESET}{C.GREEN}{moa_mark}{C.RESET}")
-                print()
+                print(f"\n  {C.DIM}Aliases: sonnet-5.5, gpt-6.1, grok, deepseek, nemotron, mimo, etc.{C.RESET}\n")
 
         elif cmd == "/moa":
             # custom ensemble: /moa model1 model2 [model3 ...] | /moa off
@@ -2929,7 +3115,7 @@ class ApexCLI:
                     print(f"  MoA ensemble: {', '.join(self.engine.moa)}  (/moa off to disable)")
                 else:
                     print("  Usage: /moa <model1> <model2> [model3 ...]   |   /moa off")
-                    print(f"  Presets: /model genspark-moa · /model gpt-moa")
+                    print(f"  Presets: /model genspark-moa · /model genspark-moa-v2 · /model gpt-moa · /model hybrid-moa · /model sol-moa")
             elif arg.strip().lower() == "off":
                 self.engine.moa = None
                 prev = getattr(self, "_moa_prev_model", None)
@@ -2937,7 +3123,7 @@ class ApexCLI:
                     self.engine.model = prev
                 print(C.s(f"  MoA disabled — back to {self.engine.model}.", C.GREEN))
             else:
-                ids = arg.split()
+                ids = [MODEL_ALIASES.get(i, i) for i in arg.split()]
                 unknown = [i for i in ids if i not in MODEL_CATALOG]
                 if unknown:
                     print(C.s(f"  Unknown model(s): {', '.join(unknown)} — see /model", C.RED))
