@@ -66,44 +66,62 @@ Stream ends at `project_field status=FINISHED`. Assemble `text` from `delta` chu
 
 ## Valid `ai_chat_model` values
 
-Derived from Nuxt hydration + dropdown clicks (lowercase, hyphenated):
+Derived from Nuxt hydration + dropdown clicks + server verification (lowercase, hyphenated):
 
 | Display (cost in UI) | `ai_chat_model` |
 |---|---|
-| Mixture-of-Agents | `use_moa_proxy:true` + `moa_models:["gpt-5.1-low","claude-sonnet-4-6","gemini-3.1-pro-preview"]` |
+| Mixture-of-Agents (Live) | `use_moa_proxy:true` + `moa_models:["gpt-5.6-luna","gpt-6.1-sol","gemini-3.7-flash"]` |
+| Mixture-of-Agents (Classic) | `use_moa_proxy:true` + `moa_models:["gpt-5.1-low","claude-sonnet-4-6","gemini-3.1-pro-preview"]` |
+| Claude Opus 5.5 (5x) [Apex default] | `claude-opus-5-5` |
 | Claude Opus 5 (5x) | `claude-opus-5` |
 | Claude Opus 4.8 (5x) | `claude-opus-4-8` |
 | Claude Opus 4.7 (5x) | `claude-opus-4-7` |
 | Claude Opus 4.6 (5x) | `claude-opus-4-6` |
+| Claude Opus 4.5 (5x) | `claude-opus-4-5` |
+| Claude Sonnet 5.5 (3x) | `claude-sonnet-5-5` |
 | Claude Sonnet 5 (2x) | `claude-sonnet-5` |
 | Claude Sonnet 4.6 (3x) | `claude-sonnet-4-6` |
-| **Claude Haiku 4.5 (1x) default** | `claude-4-5-haiku` |
+| Claude Sonnet 4.5 (3x) | `claude-sonnet-4-5` |
+| Claude Sonnet 4 (3x) | `claude-sonnet-4` |
+| Claude Haiku 4.5 (1x) | `claude-4-5-haiku` |
 | GPT-5.5 Pro (30x) | `gpt-5.5-pro` |
 | GPT-5.4 Pro (30x) | `gpt-5.4-pro` |
 | GPT-5.2 Pro (21x) | `gpt-5.2-pro` |
+| GPT-6.1 Sol (4x) | `gpt-6.1-sol` |
+| GPT-6 Sol (4x) | `gpt-6-sol` |
+| GPT-6 Luna (0.2x) | `gpt-6-luna` |
 | GPT-5.6 Sol (4x) | `gpt-5.6-sol` |
+| GPT-5.6 Terra (2x) | `gpt-5.6-terra` |
+| GPT-5.6 Luna (0.2x) | `gpt-5.6-luna` |
 | GPT-5.5 (5x) | `gpt-5.5` |
 | GPT-5.4 (3x) | `gpt-5.4` |
-| GPT-5.6 Terra (2x) | `gpt-5.6-terra` |
 | GPT-5.4 Mini (1x) | `gpt-5.4-mini` |
-| GPT-5.6 Luna (0.2x) | `gpt-5.6-luna` |
 | GPT-5.4 Nano (0.2x) | `gpt-5.4-nano` |
+| GPT-5.2 (2x) | `gpt-5.2` |
+| GPT-5.1 Thinking High (3x) | `gpt-5.1-high` |
+| GPT-5.1 Thinking (2x) | `gpt-5.1-medium` |
+| GPT-5.1 Instant (1x) | `gpt-5.1-low` |
 | Gemini 3.1 Pro Preview (2x) | `gemini-3.1-pro-preview` |
 | Gemini 3.8 Flash (0.75x) | `gemini-3.8-flash` |
 | Gemini 3.7 Flash (0.75x) | `gemini-3.7-flash` |
 | Gemini 3.6 Flash (0.75x) | `gemini-3.6-flash` |
 | Gemini 3.5 Flash (2x) | `gemini-3.5-flash` |
 | Gemini 3 Flash Preview (0.5x) | `gemini-3-flash-preview` |
+| Gemini 2.5 Flash (0.5x) | `gemini-2.5-flash` |
 | Gemini 3.1 Flash Lite (0.3x) | `gemini-3.1-flash-lite-preview` |
+| Grok 4.7 (2x) | `grok-4.7` |
 | Grok 4.6 (2x) | `grok-4.6` |
 | Grok 4.5 (2x) | `grok-4.5` |
-| Muse Spark 1.3 (1x) | `muse-spark-1.3` |
+| DeepSeek V4.1 Flash (1x) | `deep-seek-v4.1-flash` |
 | DeepSeek V4 Pro (2x) | `deepseek-v4-pro` |
 | Kimi K3 (3x) | `kimi-k3` |
 | Minimax M3 (0.3x) | `minimax-m3` |
-| GLM-5.3 (1x) | `glm-5.3` |
-
-Hidden but accepted (not in dropdown): `claude-opus-4-5`, `claude-opus-4-1`, `claude-sonnet-4-5`, `claude-sonnet-4`, `gpt-5-pro`, `gpt-5.2`, `gpt-5.1-low`, `gpt-5.1-medium`, `gpt-5.1-high`, `gemini-2.5-pro`, `gemini-2.5-flash`, `deepseek-v4-pro-0813`, `deepseek-v4-flash`, `deep-seek-v4-flash-vision-exp`, `minimax-m2.7`, `glm-5.2`, `nemotron-3-ultra`, `solar-pro-4`. Test before bulk use — some may 400.
+| GLM-5.3 (1x) | `glm-5p3` (also `glm-5.3`) |
+| GLM-5.3 Flash (0.5x) | `glm-5p3-flash-baseten` |
+| Nemotron 3 Ultra (2x) | `nemotron-3-ultra` |
+| MiMo V2.6 Pro (2x) | `mimo-v2.6-pro` |
+| MiMo V2.6 Flash (0.5x) | `mimo-v2.6-flash` |
+| Muse Spark 1.3 (1x) | `muse-spark-1.3` |
 
 ## cURL (single turn, new thread)
 

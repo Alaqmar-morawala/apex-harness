@@ -15,7 +15,7 @@ A native, single-file autonomous coding agent built for **Genspark models**. Ape
 - **Atomic file tools** — `write_file` / `edit_file` with automatic snapshots and instant `/undo` (50-deep stack)
 - **Depth-aware tool parser** — handles nested `<tool>` examples inside file contents, ignores tool examples inside markdown code fences/backticks, salvages unclosed tags at end-of-stream
 - **Context compaction** — 22k-char active budget with head/tail preservation and automatic tool-result summarization
-- **30+ model catalog** — Claude Opus 5.5 (default, server-verified ids only), Sonnet 5, GPT-5.6 Sol, Gemini 3.8 Flash, and more, switchable mid-session — with a substitution guard that warns if the upstream ever ignores the requested model
+- **50+ model catalog** — Claude Opus 5.5 (default), Sonnet 5.5, GPT-6.1 Sol, GPT-6 Sol, Grok 4.7, Nemotron 3 Ultra, MiMo V2.6 Pro, DeepSeek V4.1 Flash, GLM-5.3, with seamless alias resolution and MoA ensembles — backed by a substitution guard that verifies upstream model honors
 - **Hardened UI** — bounded output truncation with honest counts, no terminal floods, Ctrl+C aborts the task but preserves the session
 
 ## Quickstart

@@ -173,17 +173,33 @@ By analyzing the hydration payload of `https://www.genspark.ai/agents?type=ai_ch
 | **Claude Opus 5** | `claude-opus-5` | `claude-opus-5` | Verified honored. |
 | **Claude Opus 4.8** | `claude-opus-4-8` | `claude-opus-4-8-extended-cache` | Verified honored as extended cache variant. |
 | **Claude Opus 4.7** | `claude-opus-4-7` | `claude-opus-4-7-extended-cache` | Verified honored as extended cache variant. |
+| **Claude Opus 4.5** | `claude-opus-4-5` | `claude-opus-4-5-20251101` | Verified honored as dated variant. |
+| **Claude Sonnet 5.5**| `claude-sonnet-5-5` | `claude-sonnet-5-5` | Verified honored SOTA coding flagship. |
 | **Claude Sonnet 5** | `claude-sonnet-5` | `claude-sonnet-5` | Fast coding flagship. |
 | **Claude Sonnet 4.6** | `claude-sonnet-4-6` | `claude-sonnet-4-6` | Reliable workhorse. |
+| **Claude Sonnet 4.5** | `claude-sonnet-4-5` | `claude-sonnet-4-5-20250929` | Verified honored as dated variant. |
+| **Claude Sonnet 4** | `claude-sonnet-4` | `claude-sonnet-4-20250514` | Verified honored as dated variant. |
 | **Claude Haiku 4.5** | `claude-4-5-haiku` | `claude-4-5-haiku` | Fast, lightweight 1x tier. |
-| **GPT-6 Sol** | `gpt-6-sol` | `gpt-6-sol` | Brand new flagship line (images + files supported). |
-| **GPT-6 Luna** | `gpt-6-luna` | `gpt-6-luna` | Brand new fast tier (0.2x cost). |
+| **GPT-6.1 Sol** | `gpt-6.1-sol` | `gpt-6.1-sol` | Verified honored newest Sol flagship. |
+| **GPT-6 Sol** | `gpt-6-sol` | `gpt-6-sol` | Flagship line (images + files supported). |
+| **GPT-6 Luna** | `gpt-6-luna` | `gpt-6-luna` | Fast tier (0.2x cost). |
 | **GPT-5.6 Sol** | `gpt-5.6-sol` | `gpt-5.6-sol` | Flagship coding model. |
 | **GPT-5.5 Pro** | `gpt-5.5-pro` | `gpt-5.5-pro-2026-04-23` | Deep reasoning 30x tier. |
 | **GPT-5.4 Pro** | `gpt-5.4-pro` | `gpt-5.4-pro` | Deep reasoning 30x tier. |
 | **GPT-5.5** | `gpt-5.5` | `gpt-5.5-2026-04-23` | Coding 5x tier. |
+| **GPT-5.2** | `gpt-5.2` | `gpt-5.2-2025-12-11` | Verified honored 2x tier. |
+| **GPT-5.1 Thinking High** | `gpt-5.1-high` | `gpt-5.1-high` | Verified honored reasoning model. |
+| **GPT-5.1 Thinking** | `gpt-5.1-medium` | `gpt-5.1-medium` | Verified honored reasoning model. |
 | **Gemini 3.8 Flash** | `gemini-3.8-flash` | `gemini-3.8-flash` | Ultra-fast generalist. |
 | **Gemini 3.1 Pro** | `gemini-3.1-pro-preview` | `gemini-3.1-pro-preview` | Multimodal coding model. |
+| **Gemini 2.5 Flash** | `gemini-2.5-flash` | `gemini-2.5-flash` | Verified honored lightweight flash model. |
+| **Grok 4.7** | `grok-4.7` | `grok-4.7` | Verified honored flagship xAI model. |
+| **DeepSeek V4.1 Flash** | `deep-seek-v4.1-flash` | `deep-seek-v4.1-flash` | Verified honored fast DeepSeek model. |
+| **GLM-5.3** | `glm-5p3` | `glm-5p3` | Verified honored canonical GLM ID. |
+| **GLM-5.3 Flash** | `glm-5p3-flash-baseten` | `glm-5p3-flash-baseten` | Verified honored Baseten-hosted flash model. |
+| **Nemotron 3 Ultra** | `nemotron-3-ultra` | `nemotron-3-ultra` | Verified honored NVIDIA reasoning model. |
+| **MiMo V2.6 Pro** | `mimo-v2.6-pro` | `mimo-v2.6-pro` | Verified honored Xiaomi flagship. |
+| **MiMo V2.6 Flash** | `mimo-v2.6-flash` | `mimo-v2.6-flash` | Verified honored Xiaomi fast model. |
 
 ### The Silent Substitution Guard (`_model_matches`)
 The engine contains an active guard:
@@ -227,11 +243,22 @@ payload = {
    - **Purpose**: Maximum raw reasoning power for the hardest mathematical, algorithmic, or security logic.
 3. **`genspark-moa`** (`/model genspark-moa`):
    - **Ensemble**: `gpt-5.1-low` + `claude-sonnet-4-6` + `gemini-3.1-pro-preview`
-   - **Burn Rate**: ~6x credits (1+3+2; `gpt-5.1-low` catalogued at 1x — unverified upstream tier).
-   - **Purpose**: General consensus coding.
-4. **Custom Ensembles**:
+   - **Burn Rate**: ~6x credits.
+   - **Purpose**: Classic general consensus coding.
+4. **`genspark-moa-v2`** (`/model genspark-moa-v2` or `moa-latest`):
+   - **Ensemble**: `gpt-5.6-luna` + `gpt-6.1-sol` + `gemini-3.7-flash`
+   - **Burn Rate**: ~4.95x credits.
+   - **Purpose**: Live Genspark Web UI default ensemble.
+5. **`sol-moa`** (`/model sol-moa` or `all-sol`):
+   - **Ensemble**: `gpt-6.1-sol` + `gpt-6-sol` + `gpt-5.6-sol`
+   - **Burn Rate**: ~12x credits.
+   - **Purpose**: All-Sol flagship coding ensemble.
+6. **Custom Ensembles**:
    - `/moa <model1> <model2> ...` (e.g. `/moa gpt-6-sol claude-sonnet-5 gemini-3.8-flash`).
    - `/moa off` disables MoA and restores the previous single model.
+
+### Automatic Model Aliases
+Apex seamlessly resolves aliases and short names across CLI flags, REPL commands, `/moa`, and subagent spawns (e.g. `sonnet-5.5` → `claude-sonnet-5-5`, `gpt-6.1` → `gpt-6.1-sol`, `grok` → `grok-4.7`, `deepseek` → `deep-seek-v4.1-flash`, `nemotron` → `nemotron-3-ultra`, `mimo` → `mimo-v2.6-pro`, `glm` → `glm-5p3`).
 
 ---
 

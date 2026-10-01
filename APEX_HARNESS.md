@@ -130,9 +130,15 @@ Skills are reusable instruction packs the model loads on demand (progressive dis
 
 ## 6. Model Catalog
 
-Apex provides access to the complete Genspark model fleet, including:
+Apex provides access to the complete Genspark model fleet (v1.10.0), including:
 
-- **Coding & General SOTA**: `claude-sonnet-5`, `claude-sonnet-4-6`, `gpt-5.6-sol`, `gpt-5.5`, `gpt-5.4`, `gemini-3.1-pro-preview`, `grok-4.6`, `deepseek-v4-pro`, `kimi-k3`
-- **Reasoning**: `claude-opus-5-5` (**default** — Claude Opus 5.5; NOTE: hyphen id — dot variants like `opus-5.5` are fake ids that silently serve Sonnet 4.5), `claude-opus-5`, `claude-opus-4-8`, `gpt-5.5-pro`, `gpt-5.4-pro`, `gpt-5.2-pro`
-- **Fast / Lightweight**: `claude-4-5-haiku`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gpt-5.6-luna`, `gpt-5.4-nano`, `minimax-m3`
-- **Mixture-of-Agents (MoA)**: Run multi-model consensus via `/model genspark-moa` (combining GPT-5.1, Claude Sonnet 4.6, and Gemini 3.1 Pro).
+- **Coding & General SOTA**: `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-sonnet-4`, `gpt-6.1-sol`, `gpt-6-sol`, `gpt-5.6-sol`, `gpt-5.5`, `gpt-5.4`, `gpt-5.2`, `gemini-3.1-pro-preview`, `grok-4.7`, `grok-4.6`, `grok-4.5`, `nemotron-3-ultra` (NVIDIA), `mimo-v2.6-pro` (Xiaomi), `deep-seek-v4.1-flash`, `glm-5p3`, `kimi-k3`
+- **Reasoning**: `claude-opus-5-5` (**default** — Claude Opus 5.5; NOTE: hyphen id — dot variants like `opus-5.5` are fake ids that silently serve Sonnet 4.5), `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`, `gpt-5.5-pro`, `gpt-5.4-pro`, `gpt-5.2-pro`, `gpt-5.1-high` (Thinking High), `gpt-5.1-medium` (Thinking)
+- **Fast / Lightweight**: `claude-4-5-haiku`, `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-2.5-flash`, `gemini-3.1-flash-lite-preview`, `gpt-6-luna`, `gpt-5.6-luna`, `gpt-5.4-nano`, `gpt-5.4-mini`, `gpt-5.1-low` (Instant), `mimo-v2.6-flash`, `glm-5p3-flash-baseten`, `minimax-m3`
+- **Mixture-of-Agents (MoA)**: Run multi-model consensus via `/model <preset>`:
+  - `genspark-moa`: Classic ensemble (`gpt-5.1-low` + `claude-sonnet-4-6` + `gemini-3.1-pro-preview`, ~6x burn)
+  - `genspark-moa-v2` (`moa-latest`): Live Genspark web UI default (`gpt-5.6-luna` + `gpt-6.1-sol` + `gemini-3.7-flash`, ~4.95x burn)
+  - `sol-moa` (`all-sol`): Sol flagship ensemble (`gpt-6.1-sol` + `gpt-6-sol` + `gpt-5.6-sol`, ~12x burn)
+  - `hybrid-moa` (`sol-opus`): Cross-vendor ensemble (`gpt-6-sol` + `gpt-5.6-sol` + `claude-opus-4-8`, ~13x burn)
+  - `gpt-moa`: All-best GPT ensemble (`gpt-5.5-pro` + `gpt-5.4-pro` + `gpt-5.6-sol` + `gpt-6-sol`, ~68x burn)
+- **Model Aliases**: Short and natural aliases are resolved automatically in `/model`, `--model`, `/moa`, and subagent spawns (e.g., `sonnet-5.5`, `gpt-6.1`, `grok`, `deepseek`, `nemotron`, `mimo`, `glm`).

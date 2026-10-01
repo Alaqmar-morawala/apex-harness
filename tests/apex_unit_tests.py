@@ -135,6 +135,44 @@ old_con = apex_harness.RICH_CONSOLE
 big_md = "# T\n" + ("word " * 10000)
 check("cap triggers over 20k chars", len(big_md) > 20000)
 
+print("=== 13. Model catalog & alias resolution ===")
+from apex_harness import MODEL_CATALOG, MODEL_ALIASES, MOA_PRESETS, _model_matches, _moa_burn
+
+new_models = [
+    "claude-opus-4-5", "claude-sonnet-5-5", "claude-sonnet-4-5", "claude-sonnet-4",
+    "gpt-6.1-sol", "gpt-5.2", "gpt-5.1-high", "gpt-5.1-medium",
+    "gemini-2.5-flash", "grok-4.7", "deep-seek-v4.1-flash",
+    "glm-5p3", "glm-5p3-flash-baseten", "nemotron-3-ultra",
+    "mimo-v2.6-pro", "mimo-v2.6-flash"
+]
+for m in new_models:
+    check(f"catalog has {m}", m in MODEL_CATALOG)
+    info = MODEL_CATALOG[m]
+    check(f"{m} has label/tier/cls", bool(info.get("label") and info.get("tier") and info.get("cls")))
+
+aliases = {
+    "opus-4.5": "claude-opus-4-5",
+    "sonnet-5.5": "claude-sonnet-5-5",
+    "gpt-6.1": "gpt-6.1-sol",
+    "grok": "grok-4.7",
+    "deepseek": "deep-seek-v4.1-flash",
+    "glm": "glm-5p3",
+    "nemotron": "nemotron-3-ultra",
+    "mimo": "mimo-v2.6-pro",
+}
+for alias, target in aliases.items():
+    check(f"alias {alias} -> {target}", MODEL_ALIASES.get(alias) == target)
+    check(f"target {target} exists in catalog", target in MODEL_CATALOG)
+
+check("opus-4-5 dated variant matches", _model_matches("claude-opus-4-5", "claude-opus-4-5-20251101"))
+check("sonnet-4-5 dated variant matches", _model_matches("claude-sonnet-4-5", "claude-sonnet-4-5-20250929"))
+check("gpt-5.2 dated variant matches", _model_matches("gpt-5.2", "gpt-5.2-2025-12-11"))
+
+for preset_name, ensemble in MOA_PRESETS.items():
+    check(f"preset {preset_name} members exist in catalog", all(m in MODEL_CATALOG for m in ensemble))
+    burn_str = _moa_burn(ensemble)
+    check(f"preset {preset_name} burn is estimated", burn_str.startswith("~") and "unknown" not in burn_str)
+
 print()
 print(f"RESULTS: {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

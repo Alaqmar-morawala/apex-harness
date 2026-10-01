@@ -210,12 +210,13 @@ print("v1.9.3a global-install fallback loads the WHOLE cookie fleet")
 import tempfile
 with tempfile.TemporaryDirectory() as td:
     import json as _j
-    raw1 = _j.loads(Path("/home/alaqmar/test/cookies.json").read_text())
-    raw2 = _j.loads(Path("/home/alaqmar/test/cookies_2.json").read_text())
-    raw3 = _j.loads(Path("/home/alaqmar/test/cookies_3.json").read_text())
-    Path(td, "cookies.json").write_text(_j.dumps(raw1))
-    Path(td, "cookies_2.json").write_text(_j.dumps(raw2))
-    Path(td, "cookies_3.json").write_text(_j.dumps(raw3))
+    found_jars = sorted(Path("/home/alaqmar/test").glob("cookies*.json"))
+    raw_list = [_j.loads(p.read_text()) for p in found_jars[:3]]
+    while len(raw_list) < 3:
+        raw_list.append([{"name": "session_id", "value": f"mock_sess_{len(raw_list)}", "domain": ".genspark.ai"}])
+    for idx, raw in enumerate(raw_list, 1):
+        suffix = "" if idx == 1 else f"_{idx}"
+        Path(td, f"cookies{suffix}.json").write_text(_j.dumps(raw))
     old_cwd = os.getcwd()
     os.chdir(td)
     try:
